@@ -1,0 +1,39 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Per-repo Renovate config, processed by the maintainer's self-hosted runner.",
+    "hassette-client is pinned twice: in manifest.json (what HA installs) and in the test dependency group (what CI tests). One grouped PR bumps both; tests/test_manifest.py fails if they drift.",
+    "The HA-floor CI job pins its own pytest-homeassistant-custom-component in tests.yml, outside Renovate's reach on purpose: the floor moves only when the code needs a newer HA, together with hacs.json."
+  ],
+  "extends": [
+    "config:recommended"
+  ],
+  "schedule": [
+    "before 9am on monday"
+  ],
+  "timezone": "America/New_York",
+  "semanticCommits": "enabled",
+  "prConcurrentLimit": 5,
+  "packageRules": [
+    {
+      "description": "A client bump changes what users install, so it is a fix that release-please releases.",
+      "matchPackageNames": [
+        "hassette-client"
+      ],
+      "groupName": "hassette-client",
+      "semanticCommitType": "fix",
+      "semanticCommitScope": "deps",
+      "schedule": [
+        "at any time"
+      ]
+    },
+    {
+      "description": "Dev and CI dependencies don't reach users and stay out of the changelog.",
+      "matchPackageNames": [
+        "!hassette-client"
+      ],
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "deps"
+    }
+  ]
+}

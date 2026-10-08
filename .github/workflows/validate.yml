@@ -1,0 +1,35 @@
+name: Validate
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+    schedule:
+        - cron: "0 6 * * 1"
+    workflow_dispatch:
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+
+jobs:
+    hassfest:
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+              with:
+                  persist-credentials: false
+            - uses: home-assistant/actions/hassfest@06749dd8c0b54f350bc69c8752456cee498808a3 # master
+
+    hacs:
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: hacs/action@d556e736723344f83838d08488c983a15381059a # 22.5.0
+              with:
+                  category: integration

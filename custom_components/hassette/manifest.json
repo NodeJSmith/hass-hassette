@@ -1,0 +1,14 @@
+{
+  "domain": "hassette",
+  "name": "Hassette",
+  "codeowners": ["@NodeJSmith"],
+  "config_flow": true,
+  "documentation": "https://github.com/NodeJSmith/hass-hassette",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/NodeJSmith/hass-hassette/issues",
+  "loggers": ["hassette_client"],
+  "requirements": ["hassette-client==0.56.0"],
+  "single_config_entry": true,
+  "version": "0.0.0"
+}

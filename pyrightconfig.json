@@ -1,0 +1,12 @@
+{
+  "include": [
+    "custom_components"
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "standard",
+  "reportMissingModuleSource": "warning",
+  "reportIncompatibleVariableOverride": "none",
+  "reportPrivateImportUsage": "none"
+}

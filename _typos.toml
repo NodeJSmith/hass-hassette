@@ -1,0 +1,5 @@
+[files]
+extend-exclude = ["CHANGELOG.md", "uv.lock", "design/"]
+
+[default.extend-words]
+hass = "hass"
