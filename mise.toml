@@ -1,0 +1,10 @@
+[tools]
+prek = "0.4.11"
+python = ["3.14.8"]
+uv = "latest"
+
+[env]
+_.python.venv = { path = ".venv" }
+
+[tasks.install]
+run = "uv sync"

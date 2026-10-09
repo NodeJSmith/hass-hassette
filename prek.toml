@@ -1,0 +1,72 @@
+# Git hooks, run by prek (https://prek.j178.dev).
+#:schema https://www.schemastore.org/prek.json
+
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "mixed-line-ending" },
+    { id = "check-case-conflict" },
+    { id = "check-json" },
+    { id = "check-yaml" },
+]
+
+[[repos]]
+repo = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.14.9"
+hooks = [
+    { id = "ruff-check", args = ["--fix"] },
+    { id = "ruff-format" },
+]
+
+[[repos]]
+repo = "https://github.com/crate-ci/typos"
+rev = "v1.46.3"
+hooks = [
+    { id = "typos", args = ["--force-exclude"], stages = ["pre-commit", "pre-push"] },
+]
+
+[[repos]]
+repo = "https://github.com/gitleaks/gitleaks"
+rev = "v8.30.1"
+hooks = [
+    # `gitleaks git --staged` scans only the index, which is empty at pre-push and in CI.
+    { id = "gitleaks", stages = ["pre-commit"] },
+    # The whole tracked tree, for pre-push and CI (lint.yml), so a commit made without local hooks is scanned too.
+    { id = "gitleaks", alias = "gitleaks-tree", name = "Detect hardcoded secrets (tracked tree)", entry = "./tools/scan_tracked_secrets.sh", pass_filenames = false, always_run = true, stages = ["pre-push"] },
+]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "pyright"
+name = "pyright"
+language = "system"
+entry = "uv run pyright"
+pass_filenames = false
+types = ["python"]
+stages = ["pre-push"]
+
+[[repos.hooks]]
+id = "zizmor"
+name = "zizmor (GitHub Actions security)"
+language = "system"
+entry = "env -u GH_TOKEN -u GITHUB_TOKEN uvx zizmor@1.26.1 --offline"
+files = '^\.github/workflows/'
+stages = ["pre-commit", "pre-push"]
+
+[[repos.hooks]]
+id = "no-mypy-ignore"
+name = 'Ban "type: ignore" comments (use pyright)'
+language = "pygrep"
+types = ["python"]
+entry = "# type: ignore"
+
+[[repos.hooks]]
+id = "no-future-annotations"
+name = "Ban from __future__ import annotations"
+language = "pygrep"
+types = ["python"]
+entry = "^from __future__ import annotations"

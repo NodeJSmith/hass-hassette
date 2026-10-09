@@ -1,0 +1,142 @@
+{
+  "config": {
+    "abort": {
+      "reauth_successful": "Re-authentication was successful",
+      "reconfigure_successful": "Re-configuration was successful",
+      "single_instance_allowed": "Already configured. Only a single configuration possible.",
+      "unsupported_version": "hassette {server_version} serves API schema {api_schema_version}, but this integration needs schema {min_api_schema_version} or newer. Upgrade hassette, then try again."
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to hassette. Check the URL, and that Home Assistant can reach it.",
+      "forbidden": "hassette's API refused the request (403). A proxy or firewall rule in front of hassette is probably blocking Home Assistant.",
+      "invalid_auth": "hassette rejected the token.",
+      "invalid_url": "Enter an http:// or https:// URL without a username or password in it, such as http://192.168.1.10:8126.",
+      "redirected": "hassette's API redirected to {location}. If that is a login page, add a bypass for /api/ to the proxy in front of hassette (see the README). If it is the https form of your URL, use that URL instead.",
+      "timeout_connect": "Timed out connecting to hassette.",
+      "token_required": "hassette needs a token from Home Assistant's address. Enter a web API token, or list Home Assistant's address in hassette's web_api.trusted_proxies.",
+      "unknown": "Unexpected error"
+    },
+    "step": {
+      "reauth_confirm": {
+        "data": {
+          "api_token": "API token"
+        },
+        "data_description": {
+          "api_token": "hassette's web API token. Leave it blank only if hassette lists Home Assistant's address in web_api.trusted_proxies."
+        },
+        "description": "hassette at {url} rejected the stored token. Enter its current web API token."
+      },
+      "reconfigure": {
+        "data": {
+          "api_token": "API token",
+          "url": "URL",
+          "verify_ssl": "Verify SSL certificate"
+        },
+        "data_description": {
+          "api_token": "hassette's web API token. Leaving it blank relies on hassette's web_api.trusted_proxies, which gives everything at Home Assistant's address full access to hassette's API.",
+          "url": "The URL of your hassette server, including the port, such as http://192.168.1.10:8126.",
+          "verify_ssl": "Turn this off only for a self-signed certificate."
+        },
+        "description": "Change how Home Assistant connects to hassette. Devices and their settings are kept."
+      },
+      "user": {
+        "data": {
+          "api_token": "API token",
+          "url": "URL",
+          "verify_ssl": "Verify SSL certificate"
+        },
+        "data_description": {
+          "api_token": "hassette's web API token. Leaving it blank relies on hassette's web_api.trusted_proxies, which gives everything at Home Assistant's address full access to hassette's API.",
+          "url": "The URL of your hassette server, including the port, such as http://192.168.1.10:8126.",
+          "verify_ssl": "Turn this off only for a self-signed certificate."
+        },
+        "description": "Connect Home Assistant to your hassette server. Each hassette app becomes a device with a switch to start and stop it, a reload button, and a status sensor."
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "reload": {
+        "name": "Reload"
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "blocked": "Blocked",
+          "degraded": "Degraded",
+          "disabled": "Disabled",
+          "failed": "Failed",
+          "running": "Running",
+          "stopped": "Stopped",
+          "unknown": "Unknown"
+        },
+        "state_attributes": {
+          "error_message": {
+            "name": "Error message"
+          },
+          "server_status": {
+            "name": "Server status"
+          }
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "action_failed": {
+      "message": "The app failed: {detail}"
+    },
+    "action_in_progress": {
+      "message": "Another action on this app is still running. Try again when it finishes."
+    },
+    "action_timeout": {
+      "message": "hassette didn't confirm the action in time. It may still have run; the app's state updates on the next refresh."
+    },
+    "blocked_by_filter": {
+      "message": "hassette's --app filter excludes this app, so it can't be started here."
+    },
+    "cannot_connect": {
+      "message": "Failed to connect to hassette."
+    },
+    "forbidden": {
+      "message": "hassette's API refused the request (403). A proxy or firewall rule in front of hassette is probably blocking Home Assistant."
+    },
+    "invalid_auth": {
+      "message": "hassette rejected the token."
+    },
+    "invalid_response": {
+      "message": "hassette sent a response this integration can't read. Check that the integration and hassette are both up to date."
+    },
+    "not_bootstrapped": {
+      "message": "hassette hasn't finished starting up, so apps can't be started yet. Try again shortly."
+    },
+    "not_found": {
+      "message": "hassette doesn't have this app in its config."
+    },
+    "redirected": {
+      "message": "hassette's API redirected to {location}. If that is a login page, add a bypass for /api/ to the proxy in front of hassette."
+    },
+    "telemetry_unavailable": {
+      "message": "hassette couldn't read its telemetry database, so it can't list apps."
+    },
+    "timeout_connect": {
+      "message": "Timed out connecting to hassette."
+    },
+    "unexpected_response": {
+      "message": "Something other than hassette answered the request, so the action may not have run. Check that the proxy in front of hassette lets Home Assistant reach /api/."
+    },
+    "unknown": {
+      "message": "Unexpected error from hassette."
+    },
+    "unsupported_version": {
+      "message": "hassette {server_version} serves API schema {api_schema_version}, but this integration needs schema {min_api_schema_version} or newer. Upgrade hassette."
+    }
+  },
+  "issues": {
+    "unsupported_version": {
+      "description": "hassette {server_version} serves API schema {api_schema_version}, but the Hassette integration needs schema {min_api_schema_version} or newer, so its apps are unavailable in Home Assistant.\n\nUpgrade hassette. The integration reconnects on its own within 10 minutes, and this message clears.",
+      "title": "hassette is too old for the Hassette integration"
+    }
+  }
+}

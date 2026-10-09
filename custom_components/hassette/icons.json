@@ -1,0 +1,31 @@
+{
+  "entity": {
+    "button": {
+      "reload": {
+        "default": "mdi:reload"
+      }
+    },
+    "sensor": {
+      "status": {
+        "default": "mdi:application-cog-outline",
+        "state": {
+          "blocked": "mdi:block-helper",
+          "degraded": "mdi:alert",
+          "disabled": "mdi:cancel",
+          "failed": "mdi:alert-circle",
+          "running": "mdi:play-circle",
+          "stopped": "mdi:stop-circle",
+          "unknown": "mdi:help-circle"
+        }
+      }
+    },
+    "switch": {
+      "running": {
+        "default": "mdi:play-circle",
+        "state": {
+          "off": "mdi:stop-circle"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,81 @@
+name: Release Please
+
+on:
+    push:
+        branches: [main]
+    workflow_dispatch:
+        inputs:
+            tag_name:
+                description: "Release tag to attach the zip to (e.g. v0.1.0). Skips release-please."
+                required: true
+                type: string
+
+permissions:
+    contents: read
+
+concurrency:
+    group: release-please
+    cancel-in-progress: false
+
+jobs:
+    release-please:
+        if: github.event_name == 'push'
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        outputs:
+            release_created: ${{ steps.release.outputs.release_created }}
+            tag_name: ${{ steps.release.outputs.tag_name }}
+        steps:
+            # An app token, not GITHUB_TOKEN, so CI runs on the release PR it opens.
+            - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+              id: app-token
+              with:
+                  app-id: ${{ secrets.RELEASE_PLEASE_APP_ID }}
+                  private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+                  permission-contents: write
+                  permission-pull-requests: write
+
+            - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+              id: release
+              with:
+                  token: ${{ steps.app-token.outputs.token }}
+                  config-file: release-please-config.json
+                  manifest-file: .release-please-manifest.json
+
+    # HACS installs the zip asset (hacs.json zip_release), so a release isn't installable until it's attached.
+    attach-zip:
+        needs: release-please
+        if: >-
+            always()
+            && (
+              (github.event_name == 'push' && needs.release-please.outputs.release_created == 'true')
+              || github.event_name == 'workflow_dispatch'
+            )
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        permissions:
+            contents: write
+        env:
+            TAG_NAME: ${{ needs.release-please.outputs.tag_name || inputs.tag_name }}
+        steps:
+            - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+              with:
+                  ref: ${{ env.TAG_NAME }}
+                  persist-credentials: false
+
+            - name: Check the manifest version matches the tag
+              run: |
+                  manifest=$(python3 -c 'import json; print(json.load(open("custom_components/hassette/manifest.json"))["version"])')
+                  if [ "v${manifest}" != "$TAG_NAME" ]; then
+                      echo "::error::manifest.json says ${manifest} but the tag is ${TAG_NAME}"
+                      exit 1
+                  fi
+
+            - name: Build hassette.zip
+              working-directory: custom_components/hassette
+              run: zip -r "${GITHUB_WORKSPACE}/hassette.zip" . -x '*/__pycache__/*' '__pycache__/*'
+
+            - name: Upload hassette.zip to the release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: gh release upload "$TAG_NAME" hassette.zip --clobber
