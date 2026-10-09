@@ -144,7 +144,7 @@ async def test_too_old_server_aborts(hass: HomeAssistant, client: MagicMock) -> 
     }
 
 
-async def test_only_one_entry(hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry) -> None:
+async def test_only_one_entry(hass: HomeAssistant, config_entry: MockConfigEntry) -> None:
     config_entry.add_to_hass(hass)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
 

@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from freezegun.api import FrozenDateTimeFactory
 from hassette_client import HassetteHTTPError
 from hassette_wire import (
     LENIENT_CONTEXT,
@@ -20,13 +21,16 @@ from hassette_wire import (
 )
 from homeassistant.const import CONF_API_TOKEN, CONF_URL, CONF_VERIFY_SSL
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
-from custom_components.hassette.const import DOMAIN
+from custom_components.hassette.const import DOMAIN, SCAN_INTERVAL
 
 URL = "http://hassette.local:8126"
 ENTRY_ID = "01HASSETTEENTRY"
 TOKEN = "s3cret-token"  # noqa: S105 - a test fixture, not a credential
+
+SWITCH = "switch.motion_lights"
+VERSION_ISSUE = (DOMAIN, "unsupported_version")
 
 
 def make_health(**overrides: Any) -> SystemStatusResponse:
@@ -72,6 +76,13 @@ def http_error[E: HassetteHTTPError](
             {"title": "Error", "status": status, "detail": detail, "code": code}, context=LENIENT_CONTEXT
         )
     return cls(status=status, endpoint="GET /api/health", problem=problem, location=location)
+
+
+async def poll(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    """Advance time by one poll interval and let the scheduled poll run."""
+    freezer.tick(SCAN_INTERVAL)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
 
 
 @pytest.fixture(autouse=True)

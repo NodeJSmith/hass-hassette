@@ -140,7 +140,7 @@ class HassetteConfigFlow(ConfigFlow, domain=DOMAIN):
             if isinstance(err, RedirectError):
                 self.placeholders = {"location": redirect_target(err)}
             if (key := lookup(FORM_ERRORS, err)) is None:
-                _LOGGER.exception("Unexpected error connecting to hassette")
+                _LOGGER.exception("hassette-client raised an error this integration doesn't map")
                 key = "unknown"
             errors["base"] = key
         except Exception:

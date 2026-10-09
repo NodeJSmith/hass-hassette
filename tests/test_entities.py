@@ -43,9 +43,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry, async_
 
 from custom_components.hassette.const import ACTION_REFRESH_COOLDOWN, MAX_DETAIL_LENGTH, SCAN_INTERVAL
 
-from .conftest import http_error, make_app, make_apps
+from .conftest import SWITCH, http_error, make_app, make_apps
 
-SWITCH = "switch.motion_lights"
 BUTTON = "button.motion_lights_reload"
 SENSOR = "sensor.motion_lights_status"
 
