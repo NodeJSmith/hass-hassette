@@ -32,7 +32,7 @@ Acceptance criteria:
 
 ## KI-002: No hub-level entity for hassette's own availability
 
-Status: open
+Status: filed (#1)
 Recorded: 2026-10-08 (feat/v0.1-integration)
 Source: ship-challenge
 Reason not fixed now: out-of-scope
