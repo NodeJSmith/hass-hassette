@@ -26,6 +26,7 @@ from hassette_client import (
     ResponseValidationError,
     ServiceUnavailableError,
     TelemetryUnavailableError,
+    UnexpectedResponseError,
     UnsupportedServerVersionError,
 )
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError, ServiceValidationError
@@ -40,7 +41,7 @@ _LOGGER = logging.getLogger(__name__)
 # hassette-client gains a class for it, it arrives as a plain ConflictError; switch to that class then.
 ACTION_IN_PROGRESS_CODE = "action_in_progress"
 
-# Failures a single stalled poll can cause; the coordinator tolerates one of these in a row.
+# Failures a single stalled poll can cause; the coordinator tolerates them within TOLERANCE_WINDOW of a good poll.
 TRANSIENT_POLL_ERRORS: tuple[type[HassetteClientError], ...] = (
     HassetteConnectionError,
     HassetteTimeoutError,
@@ -59,8 +60,9 @@ def truncate_detail(text: str) -> str:
 
 
 def redirect_target(err: RedirectError) -> str:
-    """Return where a redirect pointed, without any credentials embedded in it.
+    """Return where a redirect pointed: scheme, host and path only.
 
+    Userinfo, query and fragment are dropped, since a login page's query carries state and tokens.
     Empty when the redirect carried no ``Location`` or one that doesn't parse as a URL.
     """
     if not err.location:
@@ -69,6 +71,7 @@ def redirect_target(err: RedirectError) -> str:
         target = URL(err.location)
     except ValueError:
         return ""
+    target = target.with_query(None).with_fragment(None)
     if target.user is None and target.password is None:
         return str(target)
     return str(target.with_user(None))
@@ -128,6 +131,9 @@ ACTION_ERRORS: tuple[ErrorRow, ...] = (
     (HassetteTimeoutError, "action_timeout"),
     (HassetteConnectionError, "cannot_connect"),
     (ForbiddenError, "forbidden"),
+    # A non-JSON answer (a proxy's login page, say) most likely never reached hassette. A subclass of
+    # ResponseValidationError, so it must come first.
+    (UnexpectedResponseError, "unexpected_response"),
     (ResponseValidationError, "invalid_response"),
 )
 
@@ -170,5 +176,14 @@ def action_error(err: HassetteClientError) -> HomeAssistantError:
 
 
 def is_completed_action(err: HassetteClientError) -> bool:
-    """Whether hassette answered 2xx, so the action ran and only its response failed to parse."""
-    return isinstance(err, ResponseValidationError) and err.status is not None and 200 <= err.status < 300
+    """Whether hassette answered 2xx with JSON, so the action ran and only its response failed to parse.
+
+    A 2xx that isn't JSON (``UnexpectedResponseError``) most likely came from something in front of
+    hassette, so whether the action ran is unknown.
+    """
+    return (
+        isinstance(err, ResponseValidationError)
+        and not isinstance(err, UnexpectedResponseError)
+        and err.status is not None
+        and 200 <= err.status < 300
+    )

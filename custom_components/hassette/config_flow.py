@@ -39,15 +39,18 @@ REAUTH_SCHEMA = probatio.Schema({probatio.Optional(probatio.Secret(CONF_API_TOKE
 
 
 class InvalidUrlError(Exception):
-    """The URL can't be used: it doesn't parse, or it embeds credentials."""
+    """The URL can't be used: it doesn't parse, isn't http(s) with a host, or embeds credentials."""
 
 
 def normalize_url(raw: str) -> str:
-    """Strip one trailing ``/``; reject a URL with credentials, which would collide with the bearer token."""
+    """Trim whitespace and one trailing ``/``; reject a URL with credentials, which collide with the bearer token."""
+    raw = raw.strip()
     try:
         parsed = URL(raw)
     except ValueError as err:
         raise InvalidUrlError from err
+    if parsed.scheme not in ("http", "https") or not parsed.host:
+        raise InvalidUrlError
     if parsed.user is not None or parsed.password is not None:
         raise InvalidUrlError
     return raw.removesuffix("/")

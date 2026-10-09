@@ -4,13 +4,13 @@
       "reauth_successful": "Re-authentication was successful",
       "reconfigure_successful": "Re-configuration was successful",
       "single_instance_allowed": "Already configured. Only a single configuration possible.",
-      "unsupported_version": "hassette {server_version} serves API schema {api_schema_version}, but this integration needs schema {min_api_schema_version} or newer. Upgrade hassette, then add the integration again."
+      "unsupported_version": "hassette {server_version} serves API schema {api_schema_version}, but this integration needs schema {min_api_schema_version} or newer. Upgrade hassette, then try again."
     },
     "error": {
       "cannot_connect": "Failed to connect to hassette. Check the URL, and that Home Assistant can reach it.",
       "forbidden": "hassette's API refused the request (403). A proxy or firewall rule in front of hassette is probably blocking Home Assistant.",
       "invalid_auth": "hassette rejected the token.",
-      "invalid_url": "Enter a URL without a username or password in it, such as http://192.168.1.10:8126.",
+      "invalid_url": "Enter an http:// or https:// URL without a username or password in it, such as http://192.168.1.10:8126.",
       "redirected": "hassette's API redirected to {location}. If that is a login page, add a bypass for /api/ to the proxy in front of hassette (see the README). If it is the https form of your URL, use that URL instead.",
       "timeout_connect": "Timed out connecting to hassette.",
       "token_required": "hassette needs a token from Home Assistant's address. Enter a web API token, or list Home Assistant's address in hassette's web_api.trusted_proxies.",
@@ -122,6 +122,9 @@
     },
     "timeout_connect": {
       "message": "Timed out connecting to hassette."
+    },
+    "unexpected_response": {
+      "message": "Something other than hassette answered the request, so the action may not have run. Check that the proxy in front of hassette lets Home Assistant reach /api/."
     },
     "unknown": {
       "message": "Unexpected error from hassette."

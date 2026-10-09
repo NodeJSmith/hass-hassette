@@ -67,7 +67,16 @@ async def test_blank_token_is_stored_as_absent(hass: HomeAssistant, client: Magi
     assert client.factory.call_args.kwargs["token"] is None
 
 
-@pytest.mark.parametrize("url", ["http://user:pass@hassette.local:8126", "http://user@hassette.local", "http://[::1"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://user:pass@hassette.local:8126",
+        "http://user@hassette.local",
+        "http://[::1",
+        "hassette.local:8126",
+        "ftp://hassette.local",
+    ],
+)
 async def test_unusable_url_is_rejected(hass: HomeAssistant, client: MagicMock, url: str) -> None:
     flow_id = await start_user_flow(hass)
     result = await hass.config_entries.flow.async_configure(flow_id, {**USER_INPUT, CONF_URL: url})
@@ -78,6 +87,15 @@ async def test_unusable_url_is_rejected(hass: HomeAssistant, client: MagicMock, 
 
     result = await hass.config_entries.flow.async_configure(flow_id, USER_INPUT)
     assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_url_whitespace_and_trailing_slash_are_trimmed(hass: HomeAssistant, client: MagicMock) -> None:
+    flow_id = await start_user_flow(hass)
+    result = await hass.config_entries.flow.async_configure(flow_id, {**USER_INPUT, CONF_URL: f"  {URL}/ "})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == URL
+    assert result["data"][CONF_URL] == URL
 
 
 @pytest.mark.parametrize(("error", "key"), FORM_ERRORS)

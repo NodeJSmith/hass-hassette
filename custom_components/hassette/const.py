@@ -8,6 +8,12 @@ MANUFACTURER: Final = "Hassette"
 SERVER_DEVICE_NAME: Final = "Hassette"
 
 SCAN_INTERVAL: Final = timedelta(seconds=30)
+# A transient failure keeps the previous data while the last good poll is younger than this: one
+# missed 30 s poll is tolerated, two in a row are not, whatever refreshes happened in between.
+TOLERANCE_WINDOW: Final = SCAN_INTERVAL * 1.5
+# Refreshes after actions run at once, then at most once per cooldown, so a burst of actions
+# coalesces into about two polls and a toggled switch shows its new state within a second.
+ACTION_REFRESH_COOLDOWN: Final = 1.0
 
 # A start or reload answers only after the app's on_initialize() finishes. 45 s clears hassette's
 # worst-case reload (10 s shutdown + 20 s startup timeout) with margin; polling keeps the client default.

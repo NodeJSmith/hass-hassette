@@ -44,6 +44,15 @@ hassette's API too. A token limits access to what holds the token, so prefer it.
 
 ## Entities
 
+Each app is a device, named after the app's display name, under a **Hassette** hub device. The
+device and its entities are tied to the app's key in hassette's config (`app_key`), not to its name:
+
+- Renaming the app's display name in hassette renames the device on the next poll. Entity ids keep
+  the names they were created with, so automations keep working.
+- Renaming the `app_key` makes it a different app to Home Assistant: a new device appears, and the
+  old one stays with its entities unavailable until you delete it.
+- Two apps with the same display name get entity ids with a `_2` suffix on the second one.
+
 ### Status sensor states
 
 | State | Meaning |
@@ -88,6 +97,8 @@ hassette answers again.
   To delete it, open the device and choose **Delete**. That option is offered only once hassette no
   longer has the app in its config. If the app comes back, it reuses its device.
 - **While hassette starts up,** every app entity is unavailable until hassette lets apps start.
+  Removing an app's device is also refused until then, and while hassette is unreachable, since its
+  app list may be incomplete.
 
 ## Troubleshooting
 
@@ -100,6 +111,10 @@ such as Cloudflare Access, Authelia or Authentik, sent Home Assistant to its log
 own token already guards the API, so add a bypass rule for the `/api/` path on that proxy, or point
 the integration at an address that skips the proxy (hassette's LAN address). If the redirect target
 is just the `https://` form of your URL, use that URL instead.
+
+**Something other than hassette answered the request.** A switch or button press got back a page
+that isn't hassette's JSON, typically a proxy's login page answering with success. The action may not
+have run. Add the same `/api/` bypass as for a redirect, above.
 
 **hassette's API refused the request (403).** A firewall or proxy rule in front of hassette is
 blocking Home Assistant. hassette itself answers a bad token with 401, not 403.

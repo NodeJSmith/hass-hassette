@@ -1,6 +1,7 @@
 """Tests for setting up, polling and unloading the Hassette integration."""
 
 from collections.abc import Coroutine
+from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -16,6 +17,7 @@ from hassette_client import (
     ResponseValidationError,
     ServiceUnavailableError,
     TelemetryUnavailableError,
+    UnexpectedResponseError,
 )
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE
@@ -27,12 +29,25 @@ from homeassistant.helpers.device_registry import DeviceEntryType
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.hassette import async_remove_config_entry_device
-from custom_components.hassette.const import ACTION_TIMEOUT, DOMAIN, SCAN_INTERVAL, SERVER_DEVICE_ID
+from custom_components.hassette.const import (
+    ACTION_REFRESH_COOLDOWN,
+    ACTION_TIMEOUT,
+    DOMAIN,
+    SCAN_INTERVAL,
+    SERVER_DEVICE_ID,
+    TOLERANCE_WINDOW,
+)
 
 from .conftest import ENTRY_ID, TOKEN, URL, http_error, make_app, make_apps, make_health
 
 SWITCH = "switch.motion_lights"
 VERSION_ISSUE = (DOMAIN, "unsupported_version")
+
+
+def test_timing_constants() -> None:
+    assert timedelta(seconds=30) == SCAN_INTERVAL
+    assert timedelta(seconds=45) == TOLERANCE_WINDOW
+    assert ACTION_REFRESH_COOLDOWN == 1.0
 
 
 async def poll(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
@@ -44,7 +59,8 @@ async def poll(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
 async def test_setup_registers_devices(hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry) -> None:
     assert loaded_entry.state is ConfigEntryState.LOADED
     devices = dr.async_get(hass)
-    hub = devices.async_get_device_by_identifier((DOMAIN, SERVER_DEVICE_ID), ENTRY_ID)
+    assert SERVER_DEVICE_ID == "-server"
+    hub = devices.async_get_device_by_identifier((DOMAIN, "-server"), ENTRY_ID)
     app = devices.async_get_device_by_identifier((DOMAIN, "motion_lights"), ENTRY_ID)
     assert hub is not None
     assert app is not None
@@ -67,6 +83,7 @@ async def test_setup_registers_devices(hass: HomeAssistant, client: MagicMock, l
 async def test_actions_get_their_own_longer_timeout(client: MagicMock, loaded_entry: MockConfigEntry) -> None:
     timeouts = [call.kwargs.get("request_timeout") for call in client.factory.call_args_list]
     assert timeouts == [None, ACTION_TIMEOUT]
+    assert ACTION_TIMEOUT == 45.0
     assert all(call.kwargs["token"] == TOKEN for call in client.factory.call_args_list)
 
 
@@ -128,6 +145,22 @@ async def test_too_old_server_raises_repair_until_upgraded(
     await hass.config_entries.async_reload(config_entry.entry_id)
 
     assert config_entry.state is ConfigEntryState.LOADED
+    assert ir.async_get(hass).async_get_issue(*VERSION_ISSUE) is None
+
+
+async def test_upgrade_withdraws_issue_even_if_apps_fail(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry
+) -> None:
+    client.get_health.return_value = make_health(version="0.40.0", api_schema_version=0)
+    config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(config_entry.entry_id)
+    assert ir.async_get(hass).async_get_issue(*VERSION_ISSUE) is not None
+
+    client.get_health.return_value = make_health()
+    client.get_apps.side_effect = HassetteConnectionError("refused")
+    await hass.config_entries.async_reload(config_entry.entry_id)
+
+    assert config_entry.state is ConfigEntryState.SETUP_RETRY
     assert ir.async_get(hass).async_get_issue(*VERSION_ISSUE) is None
 
 
@@ -258,6 +291,75 @@ async def test_held_bootstrap_makes_apps_unavailable(
     assert hass.states.get(SWITCH).state == STATE_ON
 
 
+async def test_missing_hub_is_registered_again(
+    hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    devices = dr.async_get(hass)
+    hub = devices.async_get_device_by_identifier((DOMAIN, SERVER_DEVICE_ID), ENTRY_ID)
+    assert hub is not None
+    devices.async_remove_device(hub.id)
+
+    client.get_apps.return_value = make_apps(make_app(), make_app("garage_door"))
+    await poll(hass, freezer)
+
+    hub = devices.async_get_device_by_identifier((DOMAIN, SERVER_DEVICE_ID), ENTRY_ID)
+    garage = devices.async_get_device_by_identifier((DOMAIN, "garage_door"), ENTRY_ID)
+    motion = devices.async_get_device_by_identifier((DOMAIN, "motion_lights"), ENTRY_ID)
+    assert hub is not None
+    assert garage is not None
+    assert motion is not None
+    assert garage.via_device_id == hub.id
+    assert motion.via_device_id == hub.id
+
+
+async def test_app_rename_updates_its_device(
+    hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    devices = dr.async_get(hass)
+    client.get_apps.return_value = make_apps(make_app(display_name="Hall Lights", class_name="HallLights"))
+    await poll(hass, freezer)
+
+    app = devices.async_get_device_by_identifier((DOMAIN, "motion_lights"), ENTRY_ID)
+    assert app is not None
+    assert (app.name, app.model) == ("Hall Lights", "HallLights")
+    assert hass.states.get(SWITCH) is not None
+
+
+async def test_app_with_key_outside_the_alphabet_is_ignored(
+    hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    client.get_apps.return_value = make_apps(make_app(), make_app("-server"), make_app("a-running"))
+    await poll(hass, freezer)
+
+    coordinator = loaded_entry.runtime_data
+    assert set(coordinator.data.apps) == {"motion_lights"}
+    assert coordinator.skipped_app_keys == {"-server", "a-running"}
+    hub = dr.async_get(hass).async_get_device_by_identifier((DOMAIN, SERVER_DEVICE_ID), ENTRY_ID)
+    assert hub is not None
+    assert hub.name == "Hassette"
+
+
+async def test_unreadable_responses_are_logged_once_per_outage(
+    hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    coordinator = loaded_entry.runtime_data
+    for size in (100, 200):
+        client.get_apps.side_effect = UnexpectedResponseError(
+            model="AppListResponse",
+            endpoint="GET /api/apps",
+            status=200,
+            content_type="text/html",
+            body_size=size,
+            body_excerpt="<html>",
+        )
+        await poll(hass, freezer)
+    assert coordinator.logged_validation_errors == {("GET /api/apps", "UnexpectedResponseError")}
+
+    client.get_apps.side_effect = None
+    await poll(hass, freezer)
+    assert coordinator.logged_validation_errors == set()
+
+
 async def test_new_app_adds_a_device(
     hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
 ) -> None:
@@ -313,6 +415,31 @@ async def test_only_departed_app_devices_are_removable(
     client.get_apps.return_value = make_apps(make_app())
     await poll(hass, freezer)
     assert await removable("garage_door") is True
+
+
+async def test_nothing_is_removable_without_a_complete_app_list(
+    hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    client.get_apps.return_value = make_apps(make_app(), make_app("garage_door"))
+    await poll(hass, freezer)
+    client.get_apps.return_value = make_apps(make_app(), make_app("garage_door", in_current_config=False))
+    await poll(hass, freezer)
+    device = dr.async_get(hass).async_get_device_by_identifier((DOMAIN, "garage_door"), ENTRY_ID)
+    assert device is not None
+    assert await async_remove_config_entry_device(hass, loaded_entry, device) is True
+
+    client.get_health.return_value = make_health(bootstrap_released=False)
+    await poll(hass, freezer)
+    assert await async_remove_config_entry_device(hass, loaded_entry, device) is False
+
+    client.get_health.return_value = make_health()
+    client.get_apps.side_effect = http_error(ForbiddenError, 403)
+    await poll(hass, freezer)
+    assert await async_remove_config_entry_device(hass, loaded_entry, device) is False
+
+    client.get_apps.side_effect = None
+    await hass.config_entries.async_unload(loaded_entry.entry_id)
+    assert await async_remove_config_entry_device(hass, loaded_entry, device) is False
 
 
 async def test_foreign_identifiers_dont_block_removal(hass: HomeAssistant, loaded_entry: MockConfigEntry) -> None:

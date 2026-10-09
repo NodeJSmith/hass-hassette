@@ -52,8 +52,9 @@ def test_poll_auth_failure_starts_reauth() -> None:
     ("location", "shown"),
     [
         (None, ""),
-        ("https://user:pw@login.example.com/auth?next=/api", "https://login.example.com/auth?next=/api"),
-        ("/cdn-cgi/access/login", "/cdn-cgi/access/login"),
+        ("https://user:pw@login.example.com/auth?next=/api", "https://login.example.com/auth"),
+        ("https://idp.example.com/login?state=secret#frag", "https://idp.example.com/login"),
+        ("/cdn-cgi/access/login?kid=abc", "/cdn-cgi/access/login"),
         ("http://[::1", ""),
     ],
 )

@@ -39,10 +39,11 @@ class HassetteAppEntity(CoordinatorEntity[HassetteCoordinator]):
         self._attr_unique_id = app_unique_id(app.app_key, description)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, app.app_key)},
+            # The coordinator keeps name and model in step with hassette (update_app_devices).
             name=app.display_name,
             model=app.class_name,
             manufacturer=MANUFACTURER,
-            # Setup registers the hub device before forwarding to the platforms.
+            # Every successful poll registers the hub device, and entities are only built after one.
             via_device_id=dr.async_get_device_id_by_identifier(
                 coordinator.hass, (DOMAIN, SERVER_DEVICE_ID), config_entry_id=coordinator.config_entry.entry_id
             ),
@@ -83,8 +84,7 @@ class HassetteControlEntity(HassetteAppEntity):
                 raise action_error(err) from err
             _LOGGER.warning("hassette ran %s on %s but its response was unreadable: %s", action, self.app_key, err)
         finally:
-            # Not async_request_refresh: its 10 s debounce would leave a toggled switch showing its old state.
-            await self.coordinator.async_refresh()
+            await self.coordinator.async_request_refresh()
 
 
 def app_unique_id(app_key: str, description: EntityDescription) -> str:

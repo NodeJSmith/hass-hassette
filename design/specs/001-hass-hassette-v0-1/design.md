@@ -1,7 +1,7 @@
 # Design: hass-hassette v0.1
 
 **Date:** 2026-10-08
-**Status:** ratified
+**Status:** built
 **Mode:** sketch
 
 ## Summary
@@ -254,7 +254,8 @@ Behavior under A+R:
 - While running: every poll reads `get_health()` (D16) and runs `check_server_version` on it (a
   local comparison on the payload already fetched). A failure creates the same repair issue and
   fails that poll with `UpdateFailed(unsupported_version)`, so entities go unavailable. Only the
-  hub device's `sw_version` update and the newer-server warning key on a change of `version`.
+  newer-server warning keys on a change of `version`; the hub device is re-registered every poll
+  (Build calls).
 - The repair issue is deleted on the first poll that passes the check, and when the entry is
   unloaded or removed.
 - Newer server: when `api_schema_version` is above `hassette_wire.API_SCHEMA_VERSION`, one WARNING
@@ -324,10 +325,10 @@ This translates the brief's status-code mapping onto the client's exception clas
 | `HassetteTimeoutError` | `timeout_connect` | `UpdateFailed(timeout_connect)` | `HomeAssistantError(action_timeout)` — "outcome unknown" |
 | `UnsupportedServerVersionError` | abort `unsupported_version` | repair issue + `ConfigEntryNotReady` on first refresh, `UpdateFailed(unsupported_version)` after (D7) | n/a |
 | `TelemetryUnavailableError` (503) | n/a | `UpdateFailed(telemetry_unavailable)` after D16's one-poll tolerance; never treated as "apps removed" | n/a |
-| `RedirectError` (any 3xx: an auth proxy's login page, an http→https upgrade, a moved path; the client never follows redirects) | `redirected`, with placeholder `{location}` = the exception's `location` with userinfo stripped. The text reads: hassette's API redirected to {location}; if that is a login page, add a proxy bypass (README); if it is the https form of your URL, use that. No core integration has a redirect key, because core libraries follow redirects silently; this follows core's form for a known failure mode (a specific key plus placeholders) | `UpdateFailed(redirected)` with the same placeholder | `HomeAssistantError(redirected)` with the same placeholder |
+| `RedirectError` (any 3xx: an auth proxy's login page, an http→https upgrade, a moved path; the client never follows redirects) | `redirected`, with placeholder `{location}` = the exception's `location` with userinfo, query and fragment stripped. The text reads: hassette's API redirected to {location}; if that is a login page, add a proxy bypass (README); if it is the https form of your URL, use that. No core integration has a redirect key, because core libraries follow redirects silently; this follows core's form for a known failure mode (a specific key plus placeholders) | `UpdateFailed(redirected)` with the same placeholder | `HomeAssistantError(redirected)` with the same placeholder |
 | `GatewayError` (502/504) or `ServiceUnavailableError` without a hassette problem code (plain 503), typically a reverse proxy while hassette restarts | `cannot_connect` | `UpdateFailed(cannot_connect)` | `HomeAssistantError(action_timeout)`: the outcome is unknown, same as a timeout |
 | `ForbiddenError` (403, e.g. a WAF or proxy rule; `PathTraversalError` can't occur on these routes) | `forbidden`: the error text names proxy/WAF rules in front of hassette | `UpdateFailed(forbidden)` | `HomeAssistantError(forbidden)` |
-| `ResponseValidationError` (incl. `UnexpectedResponseError`) | `cannot_connect` | `UpdateFailed(invalid_response)`; the client's validation message (endpoint, model, field locations, no values) is logged once at WARNING per distinct message. The client parses a list as a whole, so one malformed app fails the poll (per-element parsing is hassette#2611, not in v0.1) | On a 2xx action response the server already acted: the action counts as done (no error raised) and one WARNING is logged that the response was unreadable. Otherwise `HomeAssistantError(invalid_response)` |
+| `ResponseValidationError` (incl. `UnexpectedResponseError`) | `cannot_connect` | `UpdateFailed(invalid_response)`; the client's validation message (endpoint, model, field locations, no values) is logged once at WARNING per (endpoint, error type) until the next good poll (Addendum). The client parses a list as a whole, so one malformed app fails the poll (per-element parsing is hassette#2611, not in v0.1) | On a 2xx JSON action response the server already acted: the action counts as done (no error raised) and one WARNING is logged that the response was unreadable. An `UnexpectedResponseError` (a body that isn't JSON, at any status) most likely came from a proxy in front of hassette, so its outcome is unknown: `HomeAssistantError(unexpected_response)`. Otherwise `HomeAssistantError(invalid_response)` |
 | `AppNotFoundError` / `InvalidAppKeyError` | n/a | n/a | `ServiceValidationError(not_found)` |
 | `AppBlockedError` | n/a | n/a | `ServiceValidationError(blocked_by_filter)` |
 | `ConflictError` with code `action_in_progress` (hassette#2610; until the client adds `ActionInProgressError`, an unrecognized 409 code arrives as plain `ConflictError`) | n/a | n/a | `HomeAssistantError(action_in_progress)`: another action on this app is still running |
@@ -503,19 +504,21 @@ and HA never deletes registry state on a guess.
 
 Behavior under B:
 - Each refresh calls `get_health()`, then `get_apps()`. Either failing fails the refresh (D9's
-  table), with one tolerance: after a successful refresh, a single failed refresh caused by
-  `HassetteConnectionError`, `HassetteTimeoutError`, `GatewayError`, `ServiceUnavailableError` or
-  `TelemetryUnavailableError` keeps the previous data and availability (logged at DEBUG). Two
-  failures in a row raise `UpdateFailed` as D9 maps it. Auth failures, `unsupported_version`,
+  table), with one tolerance: a failed refresh caused by `HassetteConnectionError`,
+  `HassetteTimeoutError`, `GatewayError`, `ServiceUnavailableError` or `TelemetryUnavailableError`
+  within `TOLERANCE_WINDOW` (45 s) of the last good poll keeps the previous data and availability
+  (logged at DEBUG), so one stalled scheduled poll is absorbed and two in a row raise `UpdateFailed`
+  as D9 maps it (time-based, per the Build calls). Auth failures, `unsupported_version`,
   redirects, 403 and validation errors are never tolerated, and neither is the first refresh. This
   suppresses dashboard and automation flaps from one stalled poll, at the cost of
-  a per-entry consecutive-failure counter.
+  a per-entry last-success time.
 - While `bootstrap_released` is false, every app entity is unavailable. The hub device and its
   data stay, and the transition is logged once at INFO.
 - Version handling is D7's "While running" rule.
 - An app with `in_current_config` false, or missing from the list, keeps its device. Its entities
   are unavailable. `async_remove_config_entry_device` lets the user delete a device only when its
-  app is not current; the hub device is never removable. An app that comes back reuses its device
+  app is not current, judged from a good app list taken after bootstrap was released on a loaded
+  entry (otherwise it refuses); the hub device is never removable. An app that comes back reuses its device
   and entities.
 - A telemetry-DB failure (`TelemetryUnavailableError`) fails the refresh after the one-poll
   tolerance (D9). The maintainer
@@ -645,17 +648,20 @@ Inherited decisions come from the hassette repo's `design/specs/113-hacs-compani
 
 - [x] Implementation and tests committed
 - [x] Docs (README is the user documentation, per D13)
-- [ ] Ship-time challenge
+- [x] Ship-time challenge
 
 **Calls made during the build:**
 
 - App devices link to the hub with `via_device_id` (the hub's registry id, registered before the platforms load), not `via_device`: HA 2026.9 and 2026.10 both deprecate `DeviceInfo.via_device` (removal 2027.8) and make device identifiers unique only within a config entry.
 - A 401 in the config flow with no token uses its own error key, `token_required`, instead of `invalid_auth`: a form error has one fixed string per key, and D9 wants different text when no token was sent.
-- A URL that doesn't parse also fails with `invalid_url`, not only one with userinfo: D17 covers userinfo only, and a parse failure is the same user mistake.
+- A URL that doesn't parse, isn't `http`/`https` with a host, or has userinfo fails with `invalid_url`, after surrounding whitespace is trimmed: D17 covers userinfo only, and the others are the same user mistake (a scheme-less `host:8126` would otherwise parse and fail later as `cannot_connect`).
 - The reload button has `ButtonDeviceClass.RESTART`: the `entity-device-class` rule, following Portainer's restart button; its translated name stays "Reload".
 - Each platform adds new apps from a coordinator listener, not Portainer's per-coordinator callback lists, which would put platform state on the coordinator. Which apps get entities is decided against the entity registry: an app gets one when it is in hassette's config or already registered. hassette keeps listing removed apps from its history, so a history-only app HA never had gets no device. A departed app whose device the user deleted comes back only once it is current again. Renamed and disabled entities keep their registry entries, so they're never added twice.
-- Every action is followed by `coordinator.async_refresh()`, not `async_request_refresh()`. The request form's 10 s debounce deferred the refresh after a second action within 10 s, so a switch turned off showed on for about 10 s (seen in the D15 smoke test). A script acting on many apps now runs one refresh per action, serialized by the coordinator's lock.
-- The first poll registers the hub device, and later polls update it whenever the server version changes. Setup therefore needs no separate registration step, and entities resolve the hub's id from the registry.
+- Every action is followed by `coordinator.async_request_refresh()` on a debouncer with a 1 s cooldown that fires immediately (`ACTION_REFRESH_COOLDOWN`). HA's default 10 s cooldown left a switch turned off showing on for about 10 s (seen in the D15 smoke test); a full `async_refresh()` per action instead serialized one poll per action on the coordinator's lock, so a script acting on N apps against a down server returned after about 45 + N×10 s. The 1 s cooldown coalesces a burst into a few refreshes and bounds the stale window to the cooldown.
+- D16's "one failed poll tolerated, two in a row not" is measured in time, not counted: a transient failure keeps the previous data while the last good poll is under `TOLERANCE_WINDOW` (1.5 × the 30 s interval) old. Scheduled polls behave exactly as D16 states, and an action's refresh failing inside the window neither flips entities nor uses up the next poll's tolerance.
+- Every successful poll also brings each existing app device's name and model in line with hassette's `display_name` and `class_name` (a user's own rename is kept as `name_by_user`); entity ids keep the names they were created with.
+- The repair issue is withdrawn only after the platforms unload successfully, so a failed unload doesn't leave a partly loaded entry without it.
+- Every successful poll registers the hub device (idempotent; an unchanged device writes nothing), so setup needs no separate registration step, entities resolve the hub's id from the registry, and a hub that goes missing is back by the next poll, with existing app devices linked to it again.
 - The D9 mappings live in `errors.py` as ordered (exception class → translation key) tables, one per surface, first match wins. A poll's `unknown` is logged at DEBUG with its traceback, since the coordinator already logs the failure once.
 - Pyright checks `custom_components/` only, with `reportIncompatibleVariableOverride` and `reportPrivateImportUsage` off: HA overrides its own `cached_property` attributes with properties and re-exports without `__all__`, which core's mypy accepts. hassette also leaves tests out of pyright.
 - The integration uses relative imports (HA convention), unlike hassette's ruff `TID252`. From hassette's toolchain it also leaves out ruff's `D`, `TCH` and `DTZ` families (the code has no `datetime`, and HA core doesn't enforce docstring style), `house-lint` (hassette-specific rules), and the flake8-async hook (ruff's `ASYNC` covers it). It ports the whole-tree gitleaks scan, so CI scans more than an empty index.
@@ -665,3 +671,8 @@ Inherited decisions come from the hassette repo's `design/specs/113-hacs-compani
 - release-please uses the `simple` release type with `manifest.json` `$.version` as a JSON extra-file, starting from `0.0.0` so the first `feat` release is 0.1.0. Like hassette, it runs with a GitHub App token so CI runs on its release PRs. That needs the `RELEASE_PLEASE_APP_ID` / `RELEASE_PLEASE_APP_PRIVATE_KEY` secrets on this repo, which the maintainer adds.
 
 ## Addendum
+
+- 2026-10-08, ship-time challenge: D9's entity-action cell for `ResponseValidationError` was amended so `UnexpectedResponseError` (non-JSON body) is "outcome unknown" (`unexpected_response`) instead of "done". hassette-client documents that this error most likely didn't come from hassette and that a write's outcome is unknown; counting it as done let a proxy that answers POSTs with a 2xx HTML page turn every action into a silent no-op.
+- 2026-10-08, ship-time challenge: D9's `{location}` placeholder also drops the query and fragment, not only userinfo: a forward-auth login URL carries state and key ids there, and scheme, host and path are what identify the proxy.
+- 2026-10-08, ship-time challenge: D9's "logged once at WARNING per distinct message" became once per (endpoint, error type) since the last good poll. A non-JSON body's message embeds its size, so a proxy page that varies per request logged every poll, and a second outage after recovery logged nothing.
+- 2026-10-08, ship-time challenge: D5's "`-` is outside the app_key alphabet" is enforced at runtime: an app whose key doesn't match hassette's pattern is ignored and logged once.

@@ -81,18 +81,32 @@ def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
 
 @pytest.fixture
 def client() -> Generator[MagicMock]:
-    """The ``HassetteClient`` instance every part of the integration gets, with one app running."""
+    """The polling ``HassetteClient``, with one app running.
+
+    The integration's action client (the one built with ``request_timeout``) is a separate mock at
+    ``client.action_client``; each mock fails a call meant for the other, so a call through the wrong
+    client fails the test.
+    """
     instance = MagicMock()
     instance.get_health = AsyncMock(return_value=make_health())
     instance.get_apps = AsyncMock(return_value=make_apps(make_app()))
-    instance.action = AsyncMock(
+    instance.action = AsyncMock(side_effect=AssertionError("actions go through the action client"))
+    action_instance = MagicMock()
+    action_instance.get_health = AsyncMock(side_effect=AssertionError("polls go through the polling client"))
+    action_instance.get_apps = AsyncMock(side_effect=AssertionError("polls go through the polling client"))
+    action_instance.action = AsyncMock(
         side_effect=lambda app_key, action: ActionResponse(app_key=app_key, action=action, instance_index=None)
     )
+
+    def build(*_args: Any, request_timeout: float | None = None, **_kwargs: Any) -> MagicMock:
+        return instance if request_timeout is None else action_instance
+
     with (
-        patch("custom_components.hassette.HassetteClient", return_value=instance) as factory,
+        patch("custom_components.hassette.HassetteClient", side_effect=build) as factory,
         patch("custom_components.hassette.config_flow.HassetteClient", return_value=instance),
     ):
         instance.factory = factory
+        instance.action_client = action_instance
         yield instance
 
 
