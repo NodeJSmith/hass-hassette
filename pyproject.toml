@@ -10,7 +10,7 @@ dev = [
     "ruff>=0.14.9",
 ]
 test = [
-    "hassette-client==0.56.0",
+    "hassette-client==0.57.0",
     "pytest-cov>=7.0.0",
     "pytest-homeassistant-custom-component==0.13.371",
 ]
