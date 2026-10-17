@@ -17,13 +17,19 @@ def keys(rows: tuple[errors.ErrorRow, ...]) -> set[str]:
 
 def test_exception_keys_exist() -> None:
     used = keys(errors.POLL_ERRORS) | keys(errors.ACTION_ERRORS) | keys(errors.ACTION_VALIDATION_ERRORS)
-    used |= {"invalid_auth", "action_in_progress", "unknown", "unsupported_version"}
+    used |= {"invalid_auth", "action_in_progress", "unknown", "unsupported_version", "addon_refreshed"}
     assert used <= set(STRINGS["exceptions"])
 
 
 def test_config_flow_error_keys_exist() -> None:
     used = keys(errors.FORM_ERRORS) | {"invalid_auth", "token_required", "invalid_url", "unknown"}
     assert used <= set(STRINGS["config"]["error"])
+
+
+def test_config_flow_abort_and_step_keys_exist() -> None:
+    aborts = {"not_hassette_addon", "invalid_discovery_info", "already_configured", "unsupported_version"}
+    assert aborts <= set(STRINGS["config"]["abort"])
+    assert {"user", "hassio_confirm", "reauth_confirm", "reconfigure"} <= set(STRINGS["config"]["step"])
 
 
 def test_status_states_are_translated_and_have_icons() -> None:

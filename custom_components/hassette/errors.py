@@ -49,6 +49,14 @@ TRANSIENT_POLL_ERRORS: tuple[type[HassetteClientError], ...] = (
     ServiceUnavailableError,
 )
 
+# Failures after which a discovered entry re-reads its add-on's announcement: a rejected token, or no
+# answer at the stored address (refused, or a host that no longer answers at all).
+ADDON_FOLLOW_ERRORS: tuple[type[HassetteClientError], ...] = (
+    AuthenticationError,
+    HassetteConnectionError,
+    HassetteTimeoutError,
+)
+
 type ErrorRow = tuple[type[HassetteClientError], str]
 
 
