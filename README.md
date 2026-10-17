@@ -16,15 +16,20 @@ hassette's web UI. Each app device's **Visit** link opens that app's page in has
 ## Requirements
 
 - Home Assistant 2026.9.0 or newer
-- [HACS](https://hacs.xyz)
+- [HACS](https://hacs.xyz), only on Home Assistant before 2026.11. From 2026.11 the built-in
+  **Marketplace** replaces it.
 - A hassette server that Home Assistant can reach over HTTP. hassette 0.56 or newer: an older hassette
   serves an API this integration can't use, and Home Assistant raises a repair telling you to upgrade.
 
 ## Install
 
-1. In HACS, open the menu → **Custom repositories**, add `https://github.com/NodeJSmith/hass-hassette`
-   with type **Integration**.
-2. Find **Hassette** in HACS, download it, and restart Home Assistant.
+1. Open Hassette in your Home Assistant instance with this button. It opens the Marketplace on Home
+   Assistant 2026.11 and newer, and HACS on older versions:
+
+   [![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=NodeJSmith&repository=hass-hassette&category=integration)
+
+   Or find **Hassette** yourself under **Settings → Marketplace** (2026.11+) or in HACS (earlier).
+2. Download **Hassette** and restart Home Assistant.
 3. If hassette runs as the Home Assistant add-on, skip to [Pairing with the add-on](#pairing-with-the-add-on).
    Otherwise, go to **Settings → Devices & services → Add integration**, pick **Hassette**, and fill in:
 
@@ -40,7 +45,7 @@ Only one hassette server can be added.
 
 The hassette add-on announces itself to Home Assistant, so there's nothing to type:
 
-1. Install the integration through HACS and restart Home Assistant (steps 1 and 2 above).
+1. Install the integration from the Marketplace or HACS and restart Home Assistant (steps 1 and 2 above).
 2. Under **Settings → Devices & services**, Home Assistant shows a **Discovered** Hassette card.
 3. Choose **Configure** and confirm. The add-on supplies hassette's address and token.
 
@@ -156,7 +161,7 @@ token change asks you for the new one.
 ## Remove
 
 1. **Settings → Devices & services → Hassette →** the menu → **Delete**.
-2. To remove the files too, delete **Hassette** in HACS and restart Home Assistant.
+2. To remove the files too, delete **Hassette** in the Marketplace (or HACS on versions before 2026.11) and restart Home Assistant.
 
 Nothing needs undoing on hassette's side, unless you added Home Assistant to `web_api.trusted_proxies`
 for this integration.
