@@ -12,7 +12,7 @@ dev = [
 test = [
     "hassette-client==0.57.0",
     "pytest-cov>=7.0.0",
-    "pytest-homeassistant-custom-component==0.13.371",
+    "pytest-homeassistant-custom-component==0.13.373",
 ]
 
 [tool.uv]
