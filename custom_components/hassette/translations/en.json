@@ -1,7 +1,6 @@
 {
   "config": {
     "abort": {
-      "already_configured": "Already configured. Only a single configuration possible.",
       "invalid_discovery_info": "The hassette add-on announced a connection without a host or port.",
       "not_hassette_addon": "The add-on that announced itself isn't a hassette add-on.",
       "reauth_successful": "Re-authentication was successful",
@@ -90,9 +89,6 @@
     }
   },
   "exceptions": {
-    "addon_refreshed": {
-      "message": "The hassette add-on announced a new connection; reloading with it."
-    },
     "action_failed": {
       "message": "The app failed: {detail}"
     },
@@ -101,6 +97,9 @@
     },
     "action_timeout": {
       "message": "hassette didn't confirm the action in time. It may still have run; the app's state updates on the next refresh."
+    },
+    "addon_refreshed": {
+      "message": "The hassette add-on announced a new connection; reloading with it."
     },
     "blocked_by_filter": {
       "message": "hassette's --app filter excludes this app, so it can't be started here."

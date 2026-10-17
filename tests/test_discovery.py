@@ -172,30 +172,27 @@ async def test_unreachable_server_picks_up_the_announced_host(
     assert hass.states.get(SWITCH).state == STATE_ON
 
 
-async def test_rejected_token_with_unchanged_announcement_starts_reauth(
+@pytest.mark.parametrize(
+    "announcement",
+    [
+        pytest.param({"return_value": dict(ANNOUNCE)}, id="unchanged"),
+        pytest.param({"side_effect": AddonError("no discovery")}, id="unreadable"),
+        pytest.param({"return_value": {"port": 8126, "auth_token": NEW_TOKEN}}, id="without-host"),
+    ],
+)
+async def test_rejected_token_without_a_usable_new_announcement_starts_reauth(
     hass: HomeAssistant,
     client: MagicMock,
     addon_manager: MagicMock,
     loaded_discovered_entry: MockConfigEntry,
     freezer: FrozenDateTimeFactory,
+    announcement: dict,
 ) -> None:
+    addon_manager.async_get_addon_discovery_info.configure_mock(**announcement)
     client.get_health.side_effect = http_error(AuthenticationError, 401)
     await poll(hass, freezer)
 
-    assert pending_flow_sources(hass) == [SOURCE_REAUTH]
-
-
-async def test_unreadable_discovery_info_starts_reauth(
-    hass: HomeAssistant,
-    client: MagicMock,
-    addon_manager: MagicMock,
-    loaded_discovered_entry: MockConfigEntry,
-    freezer: FrozenDateTimeFactory,
-) -> None:
-    addon_manager.async_get_addon_discovery_info.side_effect = AddonError("no discovery")
-    client.get_health.side_effect = http_error(AuthenticationError, 401)
-    await poll(hass, freezer)
-
+    assert loaded_discovered_entry.data[CONF_API_TOKEN] == ADDON_TOKEN
     assert pending_flow_sources(hass) == [SOURCE_REAUTH]
 
 
@@ -265,21 +262,6 @@ async def test_reconfigure_with_a_new_url_stops_following_the_addon(
 
     addon_manager.factory.assert_not_called()
     assert loaded_discovered_entry.data[CONF_URL] == proxy_url
-
-
-async def test_announcement_without_host_starts_reauth(
-    hass: HomeAssistant,
-    client: MagicMock,
-    addon_manager: MagicMock,
-    loaded_discovered_entry: MockConfigEntry,
-    freezer: FrozenDateTimeFactory,
-) -> None:
-    addon_manager.async_get_addon_discovery_info.return_value = {"port": 8126, "auth_token": NEW_TOKEN}
-    client.get_health.side_effect = http_error(AuthenticationError, 401)
-    await poll(hass, freezer)
-
-    assert loaded_discovered_entry.data[CONF_API_TOKEN] == ADDON_TOKEN
-    assert pending_flow_sources(hass) == [SOURCE_REAUTH]
 
 
 async def test_without_supervisor_a_rejected_token_starts_reauth(

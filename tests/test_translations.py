@@ -27,7 +27,7 @@ def test_config_flow_error_keys_exist() -> None:
 
 
 def test_config_flow_abort_and_step_keys_exist() -> None:
-    aborts = {"not_hassette_addon", "invalid_discovery_info", "already_configured", "unsupported_version"}
+    aborts = {"not_hassette_addon", "invalid_discovery_info", "unsupported_version"}
     assert aborts <= set(STRINGS["config"]["abort"])
     assert {"user", "hassio_confirm", "reauth_confirm", "reconfigure"} <= set(STRINGS["config"]["step"])
 
