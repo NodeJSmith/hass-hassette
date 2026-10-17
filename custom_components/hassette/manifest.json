@@ -1,6 +1,9 @@
 {
   "domain": "hassette",
   "name": "Hassette",
+  "after_dependencies": [
+    "hassio"
+  ],
   "codeowners": [
     "@NodeJSmith"
   ],

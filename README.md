@@ -25,7 +25,8 @@ hassette's web UI. Each app device's **Visit** link opens that app's page in has
 1. In HACS, open the menu → **Custom repositories**, add `https://github.com/NodeJSmith/hass-hassette`
    with type **Integration**.
 2. Find **Hassette** in HACS, download it, and restart Home Assistant.
-3. Go to **Settings → Devices & services → Add integration**, pick **Hassette**, and fill in:
+3. If hassette runs as the Home Assistant add-on, skip to [Pairing with the add-on](#pairing-with-the-add-on).
+   Otherwise, go to **Settings → Devices & services → Add integration**, pick **Hassette**, and fill in:
 
 | Field | What to enter |
 |---|---|
@@ -34,6 +35,18 @@ hassette's web UI. Each app device's **Visit** link opens that app's page in has
 | Verify SSL certificate | Leave on unless hassette serves HTTPS with a self-signed certificate. |
 
 Only one hassette server can be added.
+
+### Pairing with the add-on
+
+The hassette add-on announces itself to Home Assistant, so there's nothing to type:
+
+1. Install the integration through HACS and restart Home Assistant (steps 1 and 2 above).
+2. Under **Settings → Devices & services**, Home Assistant shows a **Discovered** Hassette card.
+3. Choose **Configure** and confirm. The add-on supplies hassette's address and token.
+
+An integration paired this way follows the add-on: when hassette rejects the token or can't be reached,
+the integration reads the add-on's current address and token and reconnects with them. That covers a
+token the add-on rotated. Only the add-on it was paired with is read.
 
 ### Token or trusted proxy
 
@@ -119,8 +132,10 @@ have run. Add the same `/api/` bypass as for a redirect, above.
 **hassette's API refused the request (403).** A firewall or proxy rule in front of hassette is
 blocking Home Assistant. hassette itself answers a bad token with 401, not 403.
 
-**hassette rejected the token.** Home Assistant asks for a new token (**Reconfigure** or the
-re-authentication prompt). Copy the current one from hassette's config or `.web_api_token` file.
+**hassette rejected the token.** If the integration was paired with the add-on, it picks up the add-on's
+current token by itself, and asks only if the add-on's token is rejected too. Otherwise Home Assistant asks
+for a new token (**Reconfigure** or the re-authentication prompt). Copy the current one from hassette's
+config or `.web_api_token` file.
 
 **A "hassette is too old" repair.** Upgrade hassette. The integration retries on its own and clears
 the repair once hassette answers with a supported version.
@@ -132,6 +147,11 @@ download the log.
 ## Changing the URL or token
 
 Open the integration's page and choose **Reconfigure**. Your devices and their settings are kept.
+
+An integration paired with the add-on doesn't need this when the add-on's token changes: it picks up the
+new one by itself. Reconfiguring it with the same URL keeps that. Entering a different URL, such as a
+reverse proxy's, ends the pairing: the integration then keeps the URL and token you entered, and a later
+token change asks you for the new one.
 
 ## Remove
 

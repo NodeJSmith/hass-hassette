@@ -49,11 +49,13 @@ rules:
   devices: done
   diagnostics: todo
   discovery-update-info:
-    status: exempt
-    comment: hassette isn't discoverable; it advertises nothing on the network.
+    status: done
+    comment: >-
+      A discovered entry re-reads its add-on's discovery info when hassette rejects the token or can't be
+      reached. A manual entry has no add-on to read and uses reconfigure.
   discovery:
-    status: exempt
-    comment: hassette isn't discoverable; it advertises nothing on the network.
+    status: done
+    comment: The hassette add-on announces itself through Supervisor discovery.
   docs-data-update: done
   docs-examples: todo
   docs-known-limitations: done

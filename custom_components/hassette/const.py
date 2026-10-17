@@ -29,5 +29,15 @@ UPGRADE_DOCS_URL: Final = "https://hassette.readthedocs.io/en/stable/pages/opera
 # Exception text from app code is shown in toasts and attributes; keep it to a readable length.
 MAX_DETAIL_LENGTH: Final = 300
 
+# The Supervisor slug of the add-on an entry was discovered from. Only entries holding one re-read the
+# add-on's discovery info when hassette rejects the token or can't be reached.
+CONF_ADDON_SLUG: Final = "addon_slug"
+# Supervisor prefixes an add-on's slug with a hash of its repository (or "local"), so match the suffix. Any
+# repository's add-on slugged "hassette" matches; the user confirms before pairing, and a refresh reads only
+# the slug stored at pairing.
+ADDON_SLUG_SUFFIX: Final = "_hassette"
+# The name AddonManager puts in its log and error messages.
+ADDON_NAME: Final = "Hassette"
+
 ATTR_SERVER_STATUS: Final = "server_status"
 ATTR_ERROR_MESSAGE: Final = "error_message"

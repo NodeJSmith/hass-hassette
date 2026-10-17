@@ -1,4 +1,4 @@
-"""Config flow for Hassette: connect, reauthenticate, reconfigure."""
+"""Config flow for Hassette: connect by hand or from the add-on's announcement, reauthenticate, reconfigure."""
 
 import logging
 from collections.abc import Mapping
@@ -18,9 +18,11 @@ from homeassistant.const import CONF_API_TOKEN, CONF_URL, CONF_VERIFY_SSL
 from homeassistant.data_entry_flow import AbortFlow
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import BooleanSelector, TextSelector, TextSelectorConfig, TextSelectorType
+from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 from yarl import URL
 
-from .const import DOMAIN
+from .addon import announced_connection
+from .const import ADDON_SLUG_SUFFIX, CONF_ADDON_SLUG, DOMAIN
 from .errors import FORM_ERRORS, lookup, redirect_target, version_placeholders
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,6 +70,9 @@ class HassetteConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self.placeholders: dict[str, str] = {}
+        # The announcing add-on and the connection it announced, from async_step_hassio.
+        self.addon: HassioServiceInfo | None = None
+        self.announced: dict[str, Any] | None = None
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Ask for hassette's URL and, optionally, its web API token."""
@@ -79,6 +84,35 @@ class HassetteConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=self.add_suggested_values_to_schema(CONNECTION_SCHEMA, user_input),
             errors=errors,
             description_placeholders=self.placeholders,
+        )
+
+    async def async_step_hassio(self, discovery_info: HassioServiceInfo) -> ConfigFlowResult:
+        """Offer to connect to the hassette add-on that announced itself through Supervisor."""
+        if not discovery_info.slug.endswith(ADDON_SLUG_SUFFIX):
+            return self.async_abort(reason="not_hassette_addon")
+        if (announced := announced_connection(discovery_info.config)) is None:
+            return self.async_abort(reason="invalid_discovery_info")
+        # Supervisor re-sends the payload whenever it changes; one Discovered card at a time, and Ignore works.
+        await self._async_handle_discovery_without_unique_id()
+        _LOGGER.debug("Discovered hassette add-on %s", discovery_info.slug)
+        self.addon = discovery_info
+        self.announced = announced
+        return await self.async_step_hassio_confirm()
+
+    async def async_step_hassio_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Confirm with the user before connecting, so a discovered add-on never adds an entry on its own."""
+        if self.addon is None or self.announced is None:  # only reached from async_step_hassio, which sets both
+            return self.async_abort(reason="invalid_discovery_info")
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            data = await self.validate({**self.announced, CONF_VERIFY_SSL: True}, errors)
+            if data is not None:
+                return self.async_create_entry(title=self.addon.name, data={**data, CONF_ADDON_SLUG: self.addon.slug})
+        self._set_confirm_only()
+        return self.async_show_form(
+            step_id="hassio_confirm",
+            errors=errors,
+            description_placeholders={**self.placeholders, "addon": self.addon.name},
         )
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
@@ -105,7 +139,12 @@ class HassetteConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         entry = self._get_reconfigure_entry()
         if user_input is not None and (data := await self.validate(user_input, errors)) is not None:
-            return self.async_update_reload_and_abort(entry, title=data[CONF_URL], data=data)
+            if data[CONF_URL] != entry.data[CONF_URL]:
+                # A URL typed by hand takes over from the add-on: replacing the data drops its slug, so an
+                # outage never reverts the entry to the address the add-on announces.
+                return self.async_update_reload_and_abort(entry, title=data[CONF_URL], data=data)
+            # Same URL: merged, so a discovered entry keeps its slug and still picks up a rotated token.
+            return self.async_update_reload_and_abort(entry, data_updates=data)
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=self.add_suggested_values_to_schema(CONNECTION_SCHEMA, user_input or entry.data),
