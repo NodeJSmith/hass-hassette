@@ -59,50 +59,6 @@ ADDON_FOLLOW_ERRORS: tuple[type[HassetteClientError], ...] = (
 
 type ErrorRow = tuple[type[HassetteClientError], str]
 
-
-def truncate_detail(text: str) -> str:
-    """Shorten exception text from app code to ``MAX_DETAIL_LENGTH`` characters."""
-    if len(text) <= MAX_DETAIL_LENGTH:
-        return text
-    return text[: MAX_DETAIL_LENGTH - 1] + "…"
-
-
-def redirect_target(err: RedirectError) -> str:
-    """Return where a redirect pointed: scheme, host and path only.
-
-    Userinfo, query and fragment are dropped, since a login page's query carries state and tokens.
-    Empty when the redirect carried no ``Location`` or one that doesn't parse as a URL.
-    """
-    if not err.location:
-        return ""
-    try:
-        target = URL(err.location)
-    except ValueError:
-        return ""
-    target = target.with_query(None).with_fragment(None)
-    if target.user is None and target.password is None:
-        return str(target)
-    return str(target.with_user(None))
-
-
-def placeholders_for(err: HassetteClientError) -> dict[str, str] | None:
-    """Return the translation placeholders an error's message needs, if any (``{location}``, ``{detail}``)."""
-    if isinstance(err, RedirectError):
-        return {"location": redirect_target(err)}
-    if isinstance(err, ActionFailedError):
-        return {"detail": truncate_detail(err.detail or "")}
-    return None
-
-
-def version_placeholders(err: UnsupportedServerVersionError) -> dict[str, str]:
-    """Return the placeholders the unsupported-version messages show."""
-    return {
-        "server_version": err.server_version or "unknown",
-        "api_schema_version": str(err.api_schema_version),
-        "min_api_schema_version": str(err.min_api_schema_version),
-    }
-
-
 # Config flow form errors. A 401 is a branch, since its key depends on whether a token was sent.
 FORM_ERRORS: tuple[ErrorRow, ...] = (
     (RedirectError, "redirected"),
@@ -151,6 +107,49 @@ ACTION_VALIDATION_ERRORS: tuple[ErrorRow, ...] = (
     (InvalidAppKeyError, "not_found"),
     (AppBlockedError, "blocked_by_filter"),
 )
+
+
+def truncate_detail(text: str) -> str:
+    """Shorten exception text from app code to ``MAX_DETAIL_LENGTH`` characters."""
+    if len(text) <= MAX_DETAIL_LENGTH:
+        return text
+    return text[: MAX_DETAIL_LENGTH - 1] + "…"
+
+
+def redirect_target(err: RedirectError) -> str:
+    """Return where a redirect pointed: scheme, host and path only.
+
+    Userinfo, query and fragment are dropped, since a login page's query carries state and tokens.
+    Empty when the redirect carried no ``Location`` or one that doesn't parse as a URL.
+    """
+    if not err.location:
+        return ""
+    try:
+        target = URL(err.location)
+    except ValueError:
+        return ""
+    target = target.with_query(None).with_fragment(None)
+    if target.user is None and target.password is None:
+        return str(target)
+    return str(target.with_user(None))
+
+
+def placeholders_for(err: HassetteClientError) -> dict[str, str] | None:
+    """Return the translation placeholders an error's message needs, if any (``{location}``, ``{detail}``)."""
+    if isinstance(err, RedirectError):
+        return {"location": redirect_target(err)}
+    if isinstance(err, ActionFailedError):
+        return {"detail": truncate_detail(err.detail or "")}
+    return None
+
+
+def version_placeholders(err: UnsupportedServerVersionError) -> dict[str, str]:
+    """Return the placeholders the unsupported-version messages show."""
+    return {
+        "server_version": err.server_version or "unknown",
+        "api_schema_version": str(err.api_schema_version),
+        "min_api_schema_version": str(err.min_api_schema_version),
+    }
 
 
 def lookup(rows: tuple[ErrorRow, ...], err: HassetteClientError) -> str | None:

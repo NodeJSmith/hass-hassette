@@ -103,28 +103,28 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
             # Withdrawn as soon as the version passes, even if reading the apps then fails.
             ir.async_delete_issue(self.hass, DOMAIN, ISSUE_UNSUPPORTED_VERSION)
             apps = await self.client.get_apps()
-        except UnsupportedServerVersionError as err:
-            self.create_version_issue(err)
+        except UnsupportedServerVersionError as exc:
+            self.create_version_issue(exc)
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="unsupported_version",
-                translation_placeholders=version_placeholders(err),
-            ) from err
-        except TRANSIENT_POLL_ERRORS as err:
+                translation_placeholders=version_placeholders(exc),
+            ) from exc
+        except TRANSIENT_POLL_ERRORS as exc:
             # Returning the previous data counts as a successful poll to HA, so entities stay available.
             if self.within_tolerance():
-                _LOGGER.debug("Keeping the previous hassette data after one failed poll: %s", err)
+                _LOGGER.debug("Keeping the previous hassette data after one failed poll: %s", exc)
                 return self.data
-            await self.follow_addon(err)
-            raise poll_error(err) from err
-        except HassetteClientError as err:
-            await self.follow_addon(err)
-            if isinstance(err, ResponseValidationError):
-                key = (err.endpoint, type(err).__name__)
+            await self.follow_addon(exc)
+            raise poll_error(exc) from exc
+        except HassetteClientError as exc:
+            await self.follow_addon(exc)
+            if isinstance(exc, ResponseValidationError):
+                key = (exc.endpoint, type(exc).__name__)
                 if key not in self.logged_validation_errors:
                     self.logged_validation_errors.add(key)
-                    _LOGGER.warning("hassette sent a response this integration can't read: %s", err)
-            raise poll_error(err) from err
+                    _LOGGER.warning("hassette sent a response this integration can't read: %s", exc)
+            raise poll_error(exc) from exc
 
         self.last_success = dt_util.utcnow()
         self.logged_validation_errors.clear()

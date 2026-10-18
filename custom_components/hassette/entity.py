@@ -79,10 +79,10 @@ class HassetteControlEntity(HassetteAppEntity):
         """Send ``action`` for this app, then refresh whatever the outcome, since a failure may still have acted."""
         try:
             await self.coordinator.action_client.action(self.app_key, action)
-        except HassetteClientError as err:
-            if not is_completed_action(err):
-                raise action_error(err) from err
-            _LOGGER.warning("hassette ran %s on %s but its response was unreadable: %s", action, self.app_key, err)
+        except HassetteClientError as exc:
+            if not is_completed_action(exc):
+                raise action_error(exc) from exc
+            _LOGGER.warning("hassette ran %s on %s but its response was unreadable: %s", action, self.app_key, exc)
         finally:
             await self.coordinator.async_request_refresh()
 

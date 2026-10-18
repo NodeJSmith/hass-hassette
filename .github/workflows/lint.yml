@@ -63,4 +63,102 @@ jobs:
               run: prek run --all-files --show-diff-on-failure
 
             - name: Run pre-push hooks
-              run: prek run --all-files --hook-stage pre-push --show-diff-on-failure --skip gitleaks-tree
+              run: prek run --all-files --hook-stage pre-push --show-diff-on-failure --skip gitleaks-tree --skip check-file-size-regressions --skip check-duplicate-code
+
+    file-sizes:
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: read
+            # `gh pr view` in the gate step reads the PR's labels.
+            pull-requests: read
+        steps:
+            - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+              with:
+                  persist-credentials: false
+                  # Full history: the gate resolves the PR's merge-base, which a shallow clone may not reach.
+                  fetch-depth: 0
+                  # Pin to the raw head commit rather than GitHub's ephemeral merge commit, so house-lint
+                  # and the HEAD_SHA the gate diffs against describe the same tree.
+                  ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+            - name: Install uv and Python
+              uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+              with:
+                  python-version: "3.14"
+                  enable-cache: true
+
+            - run: uv sync --locked
+
+            - name: Check for new file-size regressions
+              # A push to main only lands through a PR that was gated already, so there is nothing to diff.
+              # A failing result passes when the PR carries the script's ALLOW_LABEL.
+              if: github.event_name == 'pull_request'
+              env:
+                  PR_NUMBER: ${{ github.event.pull_request.number }}
+                  GH_TOKEN: ${{ github.token }}
+                  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+                  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+              run: uv run python tools/check_file_size_regressions.py "$BASE_SHA" "$HEAD_SHA"
+
+    duplicate-code:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        permissions:
+            contents: read
+            # `gh pr view` in the gate step reads the PR's labels.
+            pull-requests: read
+        steps:
+            - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+              with:
+                  persist-credentials: false
+                  # See the file-sizes job: the gate needs the merge-base and the raw head commit.
+                  fetch-depth: 0
+                  ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+            - name: Install uv and Python
+              uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+              with:
+                  python-version: "3.14"
+                  enable-cache: true
+
+            - run: uv sync --locked
+
+            - name: Set up Java 21 # PMD CPD is a JVM tool
+              uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+              with:
+                  distribution: temurin
+                  java-version: "21"
+
+            - name: Check duplicate code (new-code gate)
+              if: github.event_name == 'pull_request'
+              env:
+                  PR_NUMBER: ${{ github.event.pull_request.number }}
+                  GH_TOKEN: ${{ github.token }}
+                  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+                  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+              run: uv run python tools/check_duplicate_code.py --gate-new-code "$BASE_SHA" "$HEAD_SHA"
+
+            - name: Report duplicate code backlog
+              if: github.event_name != 'pull_request'
+              run: uv run python tools/check_duplicate_code.py
+
+    security:
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+              with:
+                  persist-credentials: false
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+              with:
+                  python-version: "3.14"
+
+            # The integration's runtime dependencies are the manifest's `requirements`; the locked
+            # dev and test groups pin Home Assistant itself, which is not shipped.
+            - name: Audit the manifest requirements
+              run: |
+                  jq -r '.requirements[]' custom_components/hassette/manifest.json > requirements.txt
+                  uvx pip-audit@2.10.0 -r requirements.txt

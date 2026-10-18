@@ -34,8 +34,8 @@ async def async_read_announced_connection(hass: HomeAssistant, slug: str) -> dic
         return None
     try:
         config = await AddonManager(hass, _LOGGER, ADDON_NAME, slug).async_get_addon_discovery_info()
-    except AddonError as err:
-        _LOGGER.debug("Couldn't read the discovery info of the hassette add-on %s: %s", slug, err)
+    except AddonError as exc:
+        _LOGGER.debug("Couldn't read the discovery info of the hassette add-on %s: %s", slug, exc)
         return None
     if (announced := announced_connection(config)) is None:
         _LOGGER.debug("The hassette add-on %s announced a payload without host or port", slug)

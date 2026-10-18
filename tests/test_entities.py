@@ -48,6 +48,28 @@ from .conftest import SWITCH, http_error, make_app, make_apps
 BUTTON = "button.motion_lights_reload"
 SENSOR = "sensor.motion_lights_status"
 
+ACTION_ERRORS: list[tuple[Exception, type[HomeAssistantError], str]] = [
+    (http_error(AuthenticationError, 401), HomeAssistantError, "invalid_auth"),
+    (HassetteConnectionError("refused"), HomeAssistantError, "cannot_connect"),
+    (HassetteTimeoutError("slow"), HomeAssistantError, "action_timeout"),
+    (http_error(GatewayError, 502), HomeAssistantError, "action_timeout"),
+    (http_error(ServiceUnavailableError, 503), HomeAssistantError, "action_timeout"),
+    (http_error(ForbiddenError, 403), HomeAssistantError, "forbidden"),
+    (http_error(RedirectError, 302, location="https://login.example.com"), HomeAssistantError, "redirected"),
+    (http_error(AppNotFoundError, 404, code="app_not_found"), ServiceValidationError, "not_found"),
+    (http_error(InvalidAppKeyError, 400, code="invalid_app_key"), ServiceValidationError, "not_found"),
+    (http_error(AppBlockedError, 409, code="app_blocked"), ServiceValidationError, "blocked_by_filter"),
+    (http_error(ConflictError, 409, code="action_in_progress"), HomeAssistantError, "action_in_progress"),
+    (http_error(ConflictError, 409), HomeAssistantError, "unknown"),
+    (http_error(BootstrapNotReleasedError, 409, code="bootstrap_not_released"), HomeAssistantError, "not_bootstrapped"),
+    (
+        ResponseValidationError(model="ActionResponse", endpoint="POST /api/apps/x/start", problems=[], status=502),
+        HomeAssistantError,
+        "invalid_response",
+    ),
+    (HassetteClientError("other"), HomeAssistantError, "unknown"),
+]
+
 
 async def load_with(hass: HomeAssistant, client: MagicMock, entry: MockConfigEntry, *apps: object) -> None:
     client.get_apps.return_value = make_apps(*apps)
@@ -153,29 +175,6 @@ async def test_actions_then_refresh(
 
     client.action_client.action.assert_awaited_once_with("motion_lights", action)
     assert client.get_apps.await_count == polls + 1
-
-
-ACTION_ERRORS: list[tuple[Exception, type[HomeAssistantError], str]] = [
-    (http_error(AuthenticationError, 401), HomeAssistantError, "invalid_auth"),
-    (HassetteConnectionError("refused"), HomeAssistantError, "cannot_connect"),
-    (HassetteTimeoutError("slow"), HomeAssistantError, "action_timeout"),
-    (http_error(GatewayError, 502), HomeAssistantError, "action_timeout"),
-    (http_error(ServiceUnavailableError, 503), HomeAssistantError, "action_timeout"),
-    (http_error(ForbiddenError, 403), HomeAssistantError, "forbidden"),
-    (http_error(RedirectError, 302, location="https://login.example.com"), HomeAssistantError, "redirected"),
-    (http_error(AppNotFoundError, 404, code="app_not_found"), ServiceValidationError, "not_found"),
-    (http_error(InvalidAppKeyError, 400, code="invalid_app_key"), ServiceValidationError, "not_found"),
-    (http_error(AppBlockedError, 409, code="app_blocked"), ServiceValidationError, "blocked_by_filter"),
-    (http_error(ConflictError, 409, code="action_in_progress"), HomeAssistantError, "action_in_progress"),
-    (http_error(ConflictError, 409), HomeAssistantError, "unknown"),
-    (http_error(BootstrapNotReleasedError, 409, code="bootstrap_not_released"), HomeAssistantError, "not_bootstrapped"),
-    (
-        ResponseValidationError(model="ActionResponse", endpoint="POST /api/apps/x/start", problems=[], status=502),
-        HomeAssistantError,
-        "invalid_response",
-    ),
-    (HassetteClientError("other"), HomeAssistantError, "unknown"),
-]
 
 
 @pytest.mark.parametrize(("error", "raised", "key"), ACTION_ERRORS)

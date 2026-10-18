@@ -1,0 +1,620 @@
+#!/usr/bin/env python3
+"""CI guard: flag a code block copy-pasted 3+ times, in one file or across many.
+
+PMD CPD (https://pmd.github.io/pmd/pmd_userdocs_cpd.html) does the raw clone detection; this
+script narrows its output to the shape worth a human look. PMD CPD, not jscpd: its Python
+tokenizer treats differing literals and identifier names as equivalent when matching, so a block
+repeated several times with different values shows up as one cluster instead of scattered pairs.
+`MIN_TOKENS` is low for the same reason: same-shape matches are shorter once that noise no longer
+breaks them.
+
+Two occurrences of a block is common by design (parallel platforms, sibling entities). Requiring
+3+ occurrences (connected-component clustering over PMD's pairwise clone graph, see `cluster()`)
+separates designed parallel structure from "this should have been extracted".
+
+Fragments whose every non-blank line is part of a module docstring, an `import` statement, or an
+`if TYPE_CHECKING:` guard holding only imports are excluded: that content repeats across sibling
+files without being copy-paste debt. Checked by content (via `ast`), not by position.
+
+Everything else surfaces. For an accepted occurrence, wrap it in a marker pair:
+
+    # dup-ignore-start: <reason>
+    ...block...
+    # dup-ignore-end
+
+(This example is itself live input to the parser, since this module scans its own source. It is a
+balanced pair, so it is harmless; keep any doc examples of the marker syntax balanced.)
+
+For a file that is intentional duplication throughout, a single file-level marker excludes every
+fragment from that file:
+
+    # dup-ignore-file: <reason>
+
+The marker only counts as the line's actual leading comment (whitespace-stripped, the line
+starts with `#` immediately followed by the marker), so mentioning it in prose or in a regex
+literal doesn't register. A flagged cluster is suppressed only once *every* occurrence in it is
+wrapped. An unbalanced start/end pair is a checker error, not a silent no-op, and `main()` parses
+every marker in every scanned file (`validate_markers()`) before clustering starts.
+
+Usage:
+    python tools/check_duplicate_code.py
+    python tools/check_duplicate_code.py --gate-new-code <base-ref> <head-ref>
+
+Always does a full-repo scan (PMD CPD compares files against each other). `--gate-new-code` scans
+the head tree and, only when that finds a violation, also scans a throwaway extraction of the PR's
+merge-base tree (`scan_tree_at_ref()`), then reports only the head clusters that don't already
+match a merge-base cluster (see `new_code_violations()`).
+Needs Java 21+ on PATH, since PMD CPD is a JVM tool. The first run downloads a pinned PMD
+distribution (~50MB) to a shared cache (`$XDG_CACHE_HOME/hass-hass-hassette-dev-tools/pmd/`, default
+`~/.cache`) and verifies it against a pinned sha256.
+
+Wired into CI (`.github/workflows/lint.yml`) as a `--gate-new-code` step that fails only when the
+current PR's own diff introduces a new violation, and into the `check-duplicate-code` pre-push
+hook in prek.toml, which runs the same check against `origin/main HEAD`.
+"""
+
+import ast
+import functools
+import hashlib
+import itertools
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import urllib.request
+import xml.etree.ElementTree as ET
+import zipfile
+from collections import Counter
+from pathlib import Path
+from typing import NamedTuple, TypeGuard
+
+from lint_helpers import (
+    REPO_ROOT,
+    docstring_spans,
+    git_merge_base,
+    git_renamed_from,
+    iter_py_files,
+)
+from pr_labels import apply_label_override
+
+PMD_VERSION = "7.26.0"
+PMD_DIST_URL = f"https://github.com/pmd/pmd/releases/download/pmd_releases/{PMD_VERSION}/pmd-dist-{PMD_VERSION}-bin.zip"
+PMD_DIST_SHA256 = "9f55cb7ff0e9f9a66dd2f005eaa370e84c8a4cd971b134aa14a930c4a283ebc9"
+CPD_NS = {"cpd": "https://pmd-code.org/schema/cpd-report"}
+
+PYTHON_SCAN_PATHS = ["custom_components", "tests", "tools"]
+
+MIN_LINES = 5
+MIN_TOKENS = 20
+MIN_OCCURRENCES = 3
+ALLOW_LABEL = "lint:duplicate-code-allowed"
+
+DOWNLOAD_TIMEOUT_SECONDS = 30
+PMD_TIMEOUT_SECONDS = 300
+
+IGNORE_START_RE = re.compile(r"^\s*(?:#|//)\s*dup-ignore-start:\s*(.*)$")
+IGNORE_END_RE = re.compile(r"^\s*(?:#|//)\s*dup-ignore-end\b")
+IGNORE_FILE_RE = re.compile(r"^\s*(?:#|//)\s*dup-ignore-file:\s*(.*)$")
+
+# Repo-root-relative: --gate-new-code scans a throwaway checkout of the merge-base tree under its
+# own temp root, so this must resolve against whichever root is being scanned.
+_SELF_RELATIVE = Path("tools/check_duplicate_code.py")
+
+
+class Fragment(NamedTuple):
+    file: Path
+    start: int
+    end: int
+
+
+def is_self(path: Path, repo_root: Path) -> bool:
+    try:
+        return path.resolve().relative_to(repo_root.resolve()) == _SELF_RELATIVE
+    except ValueError:
+        return False
+
+
+class IgnoreMarkerError(Exception):
+    """Raised for a malformed dup-ignore marker — must fail loudly, not silently suppress."""
+
+
+@functools.cache
+def is_dup_ignore_file(path: Path, repo_root: Path) -> bool:
+    """Return True if the file carries a ``dup-ignore-file: <reason>`` marker anywhere."""
+    if is_self(path, repo_root):
+        return False
+    try:
+        text = path.read_text()
+    except OSError, UnicodeDecodeError:
+        return False
+    for line in text.splitlines():
+        m = IGNORE_FILE_RE.search(line)
+        if m:
+            if not m.group(1).strip():
+                raise IgnoreMarkerError(f"{path}: dup-ignore-file requires a reason, e.g. 'dup-ignore-file: <reason>'")
+            return True
+    return False
+
+
+def docstring_and_import_lines(path: Path) -> frozenset[int]:
+    """Return every 1-based line number that's part of a docstring or import statement in `path`.
+
+    Python-only (a non-.py file, or one that fails to parse, exempts nothing). Content-based
+    rather than position-based, so a fragment that happens to sit right after the imports —
+    e.g. shared path-hacking setup — is never mistaken for the imports themselves.
+    """
+    if path.suffix != ".py":
+        return frozenset()
+    try:
+        tree = ast.parse(path.read_text())
+    except OSError, UnicodeDecodeError, SyntaxError:
+        return frozenset()
+
+    lines: set[int] = set()
+    for start, end in docstring_spans(tree):
+        lines.update(range(start, end + 1))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            end = node.end_lineno or node.lineno
+            lines.update(range(node.lineno, end + 1))
+        elif is_import_only_type_checking_guard(node):
+            lines.add(node.lineno)
+    return frozenset(lines)
+
+
+def is_import_only_type_checking_guard(node: ast.AST) -> TypeGuard[ast.If]:
+    """Return True for an ``if TYPE_CHECKING:`` / ``if typing.TYPE_CHECKING:`` whose body is only imports.
+
+    The guard line is import scaffolding, so it shouldn't turn an otherwise import-only fragment into a
+    duplicate. Its imports are exempted by the ast.Import walk; this exempts the ``if`` line itself.
+    """
+    if not isinstance(node, ast.If) or node.orelse:
+        return False
+    test = node.test
+    is_guard = (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
+        isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+    )
+    return is_guard and all(isinstance(stmt, ast.Import | ast.ImportFrom) for stmt in node.body)
+
+
+def is_boilerplate(fragment: Fragment) -> bool:
+    """Return True if every non-blank line in the fragment is a docstring or import line."""
+    exempt_lines = docstring_and_import_lines(fragment.file)
+    try:
+        file_lines = fragment.file.read_text().splitlines()
+    except OSError, UnicodeDecodeError:
+        return False
+
+    non_blank = [lineno for lineno in range(fragment.start, fragment.end + 1) if file_lines[lineno - 1].strip()]
+    if not non_blank:
+        return True
+    return all(lineno in exempt_lines for lineno in non_blank)
+
+
+def is_too_short(fragment: Fragment) -> bool:
+    return (fragment.end - fragment.start + 1) < MIN_LINES
+
+
+@functools.cache
+def ignore_ranges(path: Path) -> tuple[tuple[int, int], ...]:
+    """Return every (start_line, end_line) range wrapped in a dup-ignore-start/end pair.
+
+    Marker text is matched verbatim regardless of comment syntax (# vs //), so the same
+    convention.
+    """
+    try:
+        lines = path.read_text().splitlines()
+    except OSError, UnicodeDecodeError:
+        return ()
+
+    ranges: list[tuple[int, int]] = []
+    open_start: int | None = None
+    for lineno, line in enumerate(lines, start=1):
+        start_match = IGNORE_START_RE.search(line)
+        if start_match:
+            if open_start is not None:
+                raise IgnoreMarkerError(f"{path}:{lineno}: nested dup-ignore-start (already open at line {open_start})")
+            if not start_match.group(1).strip():
+                raise IgnoreMarkerError(
+                    f"{path}:{lineno}: dup-ignore-start requires a reason, e.g. 'dup-ignore-start: <reason>'"
+                )
+            open_start = lineno
+        elif IGNORE_END_RE.search(line):
+            if open_start is None:
+                raise IgnoreMarkerError(f"{path}:{lineno}: dup-ignore-end with no matching dup-ignore-start")
+            ranges.append((open_start, lineno))
+            open_start = None
+    if open_start is not None:
+        raise IgnoreMarkerError(f"{path}:{open_start}: dup-ignore-start never closed with dup-ignore-end")
+    return tuple(ranges)
+
+
+def is_dup_ignored(fragment: Fragment) -> bool:
+    """Return True if the fragment sits fully inside a dup-ignore-start/end range in its file."""
+    return any(start <= fragment.start and fragment.end <= end for start, end in ignore_ranges(fragment.file))
+
+
+def python_scan_files(repo_root: Path) -> list[Path]:
+    """First-party .py files under PYTHON_SCAN_PATHS — exactly the Python files PMD CPD scans."""
+    return iter_py_files(repo_root, PYTHON_SCAN_PATHS)
+
+
+def validate_markers(files: list[Path], repo_root: Path) -> None:
+    """Eagerly parse every dup-ignore marker in `files`, raising on the first malformed one.
+
+    `is_dup_ignore_file`/`ignore_ranges` already raise `IgnoreMarkerError` for a malformed marker,
+    but `find_violations` only calls them on fragments PMD found duplicated 3+ times. A malformed
+    marker on code that PMD never flags as a clone — because the block genuinely appears only once
+    or twice, or the fragment predates the marker going stale — would otherwise pass silently.
+    Calling both eagerly here, over every scanned file, closes that gap; both are `functools.cache`d
+    so the later calls during clustering are free.
+
+    Skips exactly the files `is_dropped` treats as out-of-scope before it ever reaches a marker
+    check (`is_self`) —
+    those files' duplication is never evaluated, so a marker sitting in one, malformed or not, is
+    never load-bearing and shouldn't fail CI on its own.
+    """
+    for path in files:
+        if is_self(path, repo_root):
+            continue
+        is_dup_ignore_file(path, repo_root)
+        ignore_ranges(path)
+
+
+def pmd_cache_root() -> Path:
+    base = Path(os.environ["XDG_CACHE_HOME"]) if os.environ.get("XDG_CACHE_HOME") else Path.home() / ".cache"
+    return base / "hass-hassette-dev-tools" / "pmd" / PMD_VERSION
+
+
+def ensure_pmd_binary() -> Path:
+    """Return a cached `pmd` executable, downloading and verifying it on first run.
+
+    Shared across worktrees (keyed by PMD_VERSION under a user-level cache dir, not a repo-local
+    one) so N parallel worktrees don't each pull their own ~50MB copy.
+    """
+    if shutil.which("java") is None:
+        raise RuntimeError(
+            "check_duplicate_code.py needs Java 21+ on PATH to run PMD CPD (the clone detector). "
+            "Install it (e.g. `mise install java`) and retry."
+        )
+
+    install_dir = pmd_cache_root()
+    binary = install_dir / f"pmd-bin-{PMD_VERSION}" / "bin" / "pmd"
+    if binary.exists():
+        return binary
+
+    install_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(suffix=".zip")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        with urllib.request.urlopen(PMD_DIST_URL, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:  # noqa: S310 - fixed https URL
+            tmp_path.write_bytes(response.read())
+        digest = hashlib.sha256(tmp_path.read_bytes()).hexdigest()
+        if digest != PMD_DIST_SHA256:
+            raise RuntimeError(f"PMD download checksum mismatch: expected {PMD_DIST_SHA256}, got {digest}")
+        with zipfile.ZipFile(tmp_path) as zf:
+            zf.extractall(install_dir)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    mode = binary.stat().st_mode
+    binary.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return binary
+
+
+def run_pmd_cpd(pmd_binary: Path, language: str, files: list[Path], scan_root: Path) -> ET.Element:
+    """Run PMD CPD over exactly `files`, passed as an explicit `--file-list` of absolute paths.
+
+    An explicit list, rather than PMD walking directories itself, keeps `EXCLUDED_PARTS` (nested
+    virtualenvs, `node_modules`) out of the scan. `scan_root` is the tree `files` came from (the
+    checkout or a merge-base extraction) and only labels errors. PMD itself always runs from
+    REPO_ROOT, because Java comes from the checkout's mise config and the `java` shim resolves
+    nothing outside it.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        file_list = Path(tmp) / "files.txt"
+        # absolute(), not resolve(): PMD echoes these paths back, and they must stay under scan_root.
+        file_list.write_text("".join(f"{path.absolute()}\n" for path in files), encoding="utf-8")
+        cmd = [
+            str(pmd_binary),
+            "cpd",
+            "--file-list",
+            str(file_list),
+            "--language",
+            language,
+            "--minimum-tokens",
+            str(MIN_TOKENS),
+            "--format",
+            "xml",
+            "--no-fail-on-violation",
+        ]
+        try:
+            result = subprocess.run(
+                cmd, cwd=REPO_ROOT, check=True, capture_output=True, text=True, timeout=PMD_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"PMD CPD didn't finish scanning {language} within {PMD_TIMEOUT_SECONDS}s — "
+                "check for a pathological file in scope or raise PMD_TIMEOUT_SECONDS."
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"PMD CPD failed scanning {language} in {scan_root} (exit {exc.returncode}):\n{exc.stderr.strip()}"
+            ) from exc
+    return ET.fromstring(result.stdout)  # noqa: S314 -- trusted local PMD output, not untrusted input
+
+
+def fragment_from_file_element(element: ET.Element) -> Fragment:
+    path, line, endline = element.get("path"), element.get("line"), element.get("endline")
+    if path is None or line is None or endline is None:
+        raise ValueError(f"PMD CPD file element missing path/line/endline: {ET.tostring(element, encoding='unicode')}")
+    return Fragment(Path(path), int(line), int(endline))
+
+
+def duplication_blocks(root: ET.Element) -> list[list[Fragment]]:
+    blocks: list[list[Fragment]] = []
+    for dup in root.findall("cpd:duplication", CPD_NS):
+        fragments = [fragment_from_file_element(f) for f in dup.findall("cpd:file", CPD_NS)]
+        blocks.append(fragments)
+    return blocks
+
+
+def build_edges(blocks: list[list[Fragment]], repo_root: Path) -> list[tuple[Fragment, Fragment]]:
+    edges: list[tuple[Fragment, Fragment]] = []
+    for fragments in blocks:
+        kept = [fragment for fragment in fragments if not is_dropped(fragment, repo_root)]
+        # Only consecutive pairs need an edge — cluster()'s union-find still connects a
+        # whole N-way duplication block into one component via transitivity.
+        edges.extend(itertools.pairwise(kept))
+    return edges
+
+
+def is_dropped(fragment: Fragment, repo_root: Path) -> bool:
+    return (
+        is_self(fragment.file, repo_root)
+        or is_dup_ignore_file(fragment.file, repo_root)
+        or is_boilerplate(fragment)
+        or is_too_short(fragment)
+    )
+
+
+def cluster(edges: list[tuple[Fragment, Fragment]]) -> list[list[Fragment]]:
+    """Union-find over the clone graph — connects every fragment PMD says duplicates another."""
+    parent: dict[Fragment, Fragment] = {}
+
+    def find(node: Fragment) -> Fragment:
+        parent.setdefault(node, node)
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    def union(a: Fragment, b: Fragment) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for a, b in edges:
+        union(a, b)
+
+    components: dict[Fragment, list[Fragment]] = {}
+    for node in parent:
+        components.setdefault(find(node), []).append(node)
+    return list(components.values())
+
+
+def format_violation(component: list[Fragment]) -> str:
+    """Format one violation for display -- always against the real REPO_ROOT, never the throwaway
+    merge-base extraction (`scan_tree_at_ref()` returns per-cluster counts, not `Fragment`s, for
+    exactly this reason: nothing here ever needs to format a base-tree fragment for a user).
+    """
+    lines = [
+        f"    {fragment.file.relative_to(REPO_ROOT)}:{fragment.start}-{fragment.end}" for fragment in sorted(component)
+    ]
+    return "\n".join(lines)
+
+
+def find_violations(blocks: list[list[Fragment]], repo_root: Path) -> list[list[Fragment]]:
+    edges = build_edges(blocks, repo_root)
+    components = cluster(edges)
+    candidates = [component for component in components if len(component) >= MIN_OCCURRENCES]
+    # A component is suppressed only once every fragment is dup-ignored — keep it as a
+    # violation if at least one fragment still isn't.
+    return [component for component in candidates if any(not is_dup_ignored(fragment) for fragment in component)]
+
+
+def cluster_file_counts(
+    component: list[Fragment], repo_root: Path, renames: dict[Path, Path] | None = None
+) -> Counter[Path]:
+    """Return {repo-relative file path: fragment count in this cluster} for one violation.
+
+    `renames` (only meaningful for a head-tree cluster) maps a head-relative path to its
+    merge-base-relative path, so a cluster's identity survives a plain rename between the two
+    scans being compared — see `new_code_violations()`.
+    """
+    counts: Counter[Path] = Counter()
+    for fragment in component:
+        rel = fragment.file.relative_to(repo_root)
+        if renames is not None:
+            rel = renames.get(rel, rel)
+        counts[rel] += 1
+    return counts
+
+
+def new_code_violations(
+    head_violations: list[list[Fragment]],
+    base_cluster_counts: list[Counter[Path]],
+    renames: dict[Path, Path],
+    repo_root: Path,
+) -> list[list[Fragment]]:
+    """Return the subset of `head_violations` this PR's own diff is responsible for.
+
+    Earlier versions of this gate inferred "is this cluster new" from how much of a fragment's
+    *lines* the PR's diff touched — a proxy that both false-positived (reformatting an existing
+    occurrence rewrites most of its lines without changing what it duplicates) and false-
+    negatived (a single-line edit can turn a previously-unrelated pair into a brand-new 3-way
+    match, at near-zero line overlap). This compares actual violation sets instead: a head
+    cluster is pre-existing only if some single merge-base cluster already contained every one
+    of its (file, occurrence-count) pairs — comparing *counts*, not just file identity, so
+    adding a new copy to a file that already contributed multiple fragments to an existing
+    cluster (e.g. scheduler.py's several same-file convenience-method duplicates) still counts
+    as new debt rather than being masked by the file's pre-existing membership. A cluster
+    lacking a fully-covering base match is reported as PR-introduced, whether that's because it
+    gained a member (an extra occurrence added to existing debt) or never existed at all (a
+    wholly new match, however small the edit that created it).
+    """
+    introduced = []
+    for component in head_violations:
+        head_counts = cluster_file_counts(component, repo_root, renames)
+        pre_existing = any(
+            all(count <= base_counts.get(path, 0) for path, count in head_counts.items())
+            for base_counts in base_cluster_counts
+        )
+        if not pre_existing:
+            introduced.append(component)
+    return introduced
+
+
+def run_scan(repo_root: Path) -> list[list[Fragment]]:
+    """Run the full PMD CPD scan against `repo_root` and return every violation there.
+
+    Full-repo, no diff scoping — `repo_root` is either the real checkout (the plain-mode and
+    backlog-reporting case) or a throwaway extraction of the PR's merge-base tree (see
+    `scan_tree_at_ref()`, used by `--gate-new-code`).
+    """
+    py_files = python_scan_files(repo_root)
+    validate_markers(py_files, repo_root)
+    pmd_binary = ensure_pmd_binary()
+    blocks = duplication_blocks(run_pmd_cpd(pmd_binary, "python", py_files, repo_root))
+    return find_violations(blocks, repo_root)
+
+
+def scan_tree_at_ref(ref: str) -> list[Counter[Path]]:
+    """Materialize `ref`'s tree into a throwaway directory, scan it, and return each violation
+    cluster's per-file fragment counts (see `cluster_file_counts()`).
+
+    Used to compute the PR's merge-base violation "shape" for `--gate-new-code`: `new_code_
+    violations()` only needs to know, per cluster, which files contributed how many fragments —
+    not the fragments' exact text or line ranges — so returning counts here (rather than raw
+    `Fragment`s tied to a temp directory that's about to be deleted) keeps the caller from ever
+    needing to know this function's throwaway root path.
+
+    Reads module-level `REPO_ROOT` directly, unlike every other function in this file's
+    `repo_root`-threading chain: `git archive` needs a real git repository as its *source*, which
+    is always the actual checkout regardless of which tree is being scanned -- only the
+    *destination* (the temp directory) varies, and that's the `repo_root` this function hands to
+    `run_scan()`.
+    """
+    with tempfile.TemporaryDirectory(prefix="check-duplicate-code-base-") as tmp_name:
+        tmp_root = Path(
+            tmp_name
+        ).resolve()  # fragments are keyed relative to this; macOS/Windows temp dirs are symlinked
+        try:
+            archive = subprocess.run(["git", "archive", ref], cwd=REPO_ROOT, capture_output=True, check=True)
+            subprocess.run(["tar", "-x"], cwd=tmp_root, input=archive.stdout, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"couldn't materialize {ref}'s tree for the merge-base scan "
+                f"({exc.cmd} exited {exc.returncode}): {exc.stderr!r}"
+            ) from exc
+        violations = run_scan(tmp_root)
+        return [cluster_file_counts(component, tmp_root) for component in violations]
+
+
+def report_full_backlog(violations: list[list[Fragment]]) -> int:
+    if violations:
+        print(f"ERROR: {len(violations)} code block(s) copy-pasted {MIN_OCCURRENCES}+ times:")
+        print()
+        for component in violations:
+            print(format_violation(component))
+            print()
+        print(
+            "Extract the shared block into a fixture, helper, or shared module. If this specific\n"
+            "duplication is intentional, wrap every occurrence: '# dup-ignore-start: <reason>' /\n"
+            "'# dup-ignore-end' (reason required)."
+        )
+        return 1
+
+    print(f"OK: no code block copy-pasted {MIN_OCCURRENCES}+ times.")
+    return 0
+
+
+def report_new_code_gate(introduced: list[list[Fragment]]) -> int:
+    """Report the clusters `new_code_violations()` determined this PR is responsible for."""
+    if introduced:
+        print(f"ERROR: this PR introduces {len(introduced)} code block(s) copy-pasted {MIN_OCCURRENCES}+ times:")
+        print()
+        for component in introduced:
+            print(format_violation(component))
+            print()
+        print(
+            "This exact combination of occurrences didn't exist as a match at this PR's merge-\n"
+            "base. Extract the shared block into a fixture, helper, or shared module, or wrap\n"
+            "every occurrence with '# dup-ignore-start: <reason>' / '# dup-ignore-end' if this\n"
+            "duplication is intentional. Pre-existing duplication this PR didn't touch isn't\n"
+            "blocked here."
+        )
+        return 1
+
+    print(f"OK: this PR introduces no new {MIN_OCCURRENCES}+-way duplicate code blocks.")
+    return 0
+
+
+def parse_gate_refs(argv: list[str]) -> tuple[str, str] | None:
+    """Parse `[--gate-new-code <base-ref> <head-ref>]` from CLI args, or None for plain mode.
+
+    Raises ValueError with a usage message on anything else — `main()` turns that into the
+    process's stderr + exit code 2.
+    """
+    if not argv:
+        return None
+    if len(argv) == 3 and argv[0] == "--gate-new-code":
+        return (argv[1], argv[2])
+    raise ValueError("Usage: check_duplicate_code.py [--gate-new-code <base-ref> <head-ref>]")
+
+
+def main() -> int:
+    try:
+        gate_refs = parse_gate_refs(sys.argv[1:])
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    try:
+        head_violations = run_scan(REPO_ROOT)
+    except IgnoreMarkerError as exc:
+        print(f"ERROR: malformed dup-ignore marker: {exc}")
+        return 1
+
+    if gate_refs is None:
+        return report_full_backlog(head_violations)
+
+    # Two reports from one head-tree scan: the backlog is printed for context but never
+    # determines this call's exit code — only the new-code gate below does.
+    print("--- Existing backlog (informational; does not affect this check's pass/fail) ---")
+    _ = report_full_backlog(head_violations)  # return value intentionally unused, see comment above
+    print()
+    print("--- This PR's new duplicate code (this determines pass/fail) ---")
+
+    base_ref, head_ref = gate_refs
+    if not head_violations:
+        # Nothing to disambiguate against a merge-base scan -- skip that second PMD invocation.
+        return report_new_code_gate([])
+
+    merge_base = git_merge_base(REPO_ROOT, base_ref, head_ref)
+    renames = git_renamed_from(REPO_ROOT, merge_base, head_ref)
+    try:
+        base_cluster_counts = scan_tree_at_ref(merge_base)
+    except IgnoreMarkerError as exc:
+        print(f"ERROR: malformed dup-ignore marker in merge-base tree ({merge_base}): {exc}")
+        return 1
+    introduced = new_code_violations(head_violations, base_cluster_counts, renames, REPO_ROOT)
+    return apply_label_override(report_new_code_gate(introduced), ALLOW_LABEL)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
