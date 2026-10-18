@@ -49,8 +49,8 @@ def normalize_url(raw: str) -> str:
     raw = raw.strip()
     try:
         parsed = URL(raw)
-    except ValueError as err:
-        raise InvalidUrlError from err
+    except ValueError as exc:
+        raise InvalidUrlError from exc
     if parsed.scheme not in ("http", "https") or not parsed.host:
         raise InvalidUrlError
     if parsed.user is not None or parsed.password is not None:
@@ -170,15 +170,15 @@ class HassetteConfigFlow(ConfigFlow, domain=DOMAIN):
         client = HassetteClient(async_get_clientsession(self.hass, verify_ssl=verify_ssl), url, token=token)
         try:
             check_server_version(await client.get_health())
-        except UnsupportedServerVersionError as err:
-            raise AbortFlow("unsupported_version", version_placeholders(err)) from err
+        except UnsupportedServerVersionError as exc:
+            raise AbortFlow("unsupported_version", version_placeholders(exc)) from exc
         except AuthenticationError:
             # With no token, the 401 means hassette doesn't trust Home Assistant's address as a proxy.
             errors["base"] = "invalid_auth" if token else "token_required"
-        except HassetteClientError as err:
-            if isinstance(err, RedirectError):
-                self.placeholders = {"location": redirect_target(err)}
-            if (key := lookup(FORM_ERRORS, err)) is None:
+        except HassetteClientError as exc:
+            if isinstance(exc, RedirectError):
+                self.placeholders = {"location": redirect_target(exc)}
+            if (key := lookup(FORM_ERRORS, exc)) is None:
                 _LOGGER.exception("hassette-client raised an error this integration doesn't map")
                 key = "unknown"
             errors["base"] = key

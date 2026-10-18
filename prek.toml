@@ -13,14 +13,6 @@ hooks = [
 ]
 
 [[repos]]
-repo = "https://github.com/astral-sh/ruff-pre-commit"
-rev = "v0.14.9"
-hooks = [
-    { id = "ruff-check", args = ["--fix"] },
-    { id = "ruff-format" },
-]
-
-[[repos]]
 repo = "https://github.com/crate-ci/typos"
 rev = "v1.46.3"
 hooks = [
@@ -40,6 +32,32 @@ hooks = [
 [[repos]]
 repo = "local"
 
+# Run through uv so the hooks use the ruff pinned in uv.lock rather than a second copy.
+[[repos.hooks]]
+id = "ruff-check"
+name = "ruff check"
+language = "system"
+entry = "uv run ruff check --fix"
+types = ["python"]
+
+[[repos.hooks]]
+id = "ruff-format"
+name = "ruff format"
+language = "system"
+entry = "uv run ruff format"
+types = ["python"]
+
+# HSL102 (file size) is excluded here; growth past it is gated by the `check-file-size-regressions`
+# hook below and the `file-sizes` job in lint.yml.
+[[repos.hooks]]
+id = "house-lint"
+name = "house-lint"
+language = "system"
+entry = "uv run house-lint check --ignore HSL102"
+files = '^(custom_components|tests|tools)/.*\.py$'
+require_serial = true
+stages = ["pre-commit", "pre-push"]
+
 [[repos.hooks]]
 id = "pyright"
 name = "pyright"
@@ -56,6 +74,28 @@ language = "system"
 entry = "env -u GH_TOKEN -u GITHUB_TOKEN uvx zizmor@1.26.1 --offline"
 files = '^\.github/workflows/'
 stages = ["pre-commit", "pre-push"]
+
+# These two compare against origin/main, so they run at pre-push only; lint.yml runs them in their own
+# jobs against the PR's exact base/head SHAs.
+[[repos.hooks]]
+id = "check-file-size-regressions"
+name = "Check for new file-size regressions"
+language = "system"
+entry = "uv run python tools/check_file_size_regressions.py origin/main HEAD"
+pass_filenames = false
+require_serial = true
+types = ["python"]
+stages = ["pre-push"]
+
+[[repos.hooks]]
+id = "check-duplicate-code"
+name = "Check for new 3+-way duplicate code (PMD CPD, needs Java 21)"
+language = "system"
+entry = "uv run python tools/check_duplicate_code.py --gate-new-code origin/main HEAD"
+pass_filenames = false
+require_serial = true
+types = ["python"]
+stages = ["pre-push"]
 
 [[repos.hooks]]
 id = "no-mypy-ignore"

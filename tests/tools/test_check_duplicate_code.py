@@ -1,0 +1,598 @@
+"""Characterization tests for tools/check_duplicate_code.py.
+
+Pin the pure logic — union-find clustering, the docstring/import boilerplate exemption, the
+self-exclusion, the `dup-ignore-start`/`dup-ignore-end` escape hatch (including
+its error paths), PMD XML parsing, and the `--gate-new-code` merge-base cluster comparison —
+without invoking the real PMD binary or network.
+"""
+
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+from collections import Counter
+from collections.abc import Callable
+from pathlib import Path
+
+import check_duplicate_code
+import pytest
+from check_duplicate_code import (
+    CPD_NS,
+    Fragment,
+    IgnoreMarkerError,
+    build_edges,
+    cluster,
+    cluster_file_counts,
+    duplication_blocks,
+    find_violations,
+    fragment_from_file_element,
+    ignore_ranges,
+    is_dup_ignore_file,
+    is_dup_ignored,
+    is_self,
+    is_too_short,
+    new_code_violations,
+    validate_markers,
+)
+
+from .conftest import GitRepo
+
+REPO_ROOT_STUB = Path("/repo")
+MARKED_SOURCE = "def f():\n    # dup-ignore-start: shared setup pattern, intentional\n    x = 1\n    # dup-ignore-end\n"
+
+
+@pytest.fixture
+def write_file(tmp_path: Path) -> Callable[[str, str], Path]:
+    """Return a helper that writes content to a named file under tmp_path."""
+
+    def _write(name: str, content: str) -> Path:
+        target = tmp_path / name
+        target.write_text(content)
+        return target
+
+    return _write
+
+
+def test_cluster_chains_pairwise_edges_into_one_component() -> None:
+    a, b, c = Fragment(Path("a.py"), 1, 5), Fragment(Path("b.py"), 1, 5), Fragment(Path("c.py"), 1, 5)
+    components = cluster([(a, b), (b, c)])
+    assert len(components) == 1
+    assert set(components[0]) == {a, b, c}
+
+
+def test_cluster_keeps_disjoint_edges_separate() -> None:
+    a, b, c, d = (
+        Fragment(Path("a.py"), 1, 5),
+        Fragment(Path("b.py"), 1, 5),
+        Fragment(Path("c.py"), 1, 5),
+        Fragment(Path("d.py"), 1, 5),
+    )
+    components = cluster([(a, b), (c, d)])
+    assert len(components) == 2
+    assert {frozenset(comp) for comp in components} == {frozenset({a, b}), frozenset({c, d})}
+
+
+def test_is_too_short_below_min_lines() -> None:
+    assert is_too_short(Fragment(Path("a.py"), 1, 3)) is True
+
+
+def test_is_too_short_at_min_lines() -> None:
+    assert is_too_short(Fragment(Path("a.py"), 1, 5)) is False
+
+
+def test_is_dup_ignore_file_python(write_file: Callable[[str, str], Path], tmp_path: Path) -> None:
+    path = write_file("ignored.py", "# dup-ignore-file: sibling entities share fields by design\nx = 1\n")
+    is_dup_ignore_file.cache_clear()
+    assert is_dup_ignore_file(path, tmp_path) is True
+
+
+def test_is_dup_ignore_file_false_for_ordinary(write_file: Callable[[str, str], Path], tmp_path: Path) -> None:
+    path = write_file("normal.py", "x = 1\n")
+    is_dup_ignore_file.cache_clear()
+    assert is_dup_ignore_file(path, tmp_path) is False
+
+
+def test_is_dup_ignore_file_requires_reason(write_file: Callable[[str, str], Path], tmp_path: Path) -> None:
+    path = write_file("bad.py", "# dup-ignore-file:\n")
+    is_dup_ignore_file.cache_clear()
+    with pytest.raises(IgnoreMarkerError, match="requires a reason"):
+        is_dup_ignore_file(path, tmp_path)
+
+
+def test_is_self_true_for_own_source() -> None:
+    self_path = Path(check_duplicate_code.__file__)
+    assert is_self(self_path, check_duplicate_code.REPO_ROOT) is True
+
+
+def test_is_dup_ignore_file_false_for_self() -> None:
+    """The tool's docstring contains a literal ``# dup-ignore-file: <reason>`` example.
+
+    The regex would match it, but is_dup_ignore_file explicitly excludes its own source
+    so the docstring example never accidentally suppresses the tool's own findings.
+    """
+    is_dup_ignore_file.cache_clear()
+    self_path = Path(check_duplicate_code.__file__)
+    assert is_dup_ignore_file(self_path, check_duplicate_code.REPO_ROOT) is False
+
+
+def test_is_dup_ignored_true_inside_marker_range(write_file: Callable[[str, str], Path]) -> None:
+    path = write_file(
+        "ok.py",
+        MARKED_SOURCE,
+    )
+    assert is_dup_ignored(Fragment(path, 3, 3)) is True
+
+
+def test_is_dup_ignored_false_outside_marker_range(write_file: Callable[[str, str], Path]) -> None:
+    path = write_file(
+        "ok.py",
+        MARKED_SOURCE,
+    )
+    assert is_dup_ignored(Fragment(path, 1, 1)) is False
+
+
+def test_unbalanced_start_marker_raises(write_file: Callable[[str, str], Path]) -> None:
+    path = write_file("bad.py", "def f():\n    # dup-ignore-start: never closed\n    x = 1\n")
+    with pytest.raises(IgnoreMarkerError, match="never closed"):
+        is_dup_ignored(Fragment(path, 3, 3))
+
+
+def test_dangling_end_marker_raises(write_file: Callable[[str, str], Path]) -> None:
+    path = write_file("bad.py", "def f():\n    x = 1\n    # dup-ignore-end\n")
+    with pytest.raises(IgnoreMarkerError, match="no matching dup-ignore-start"):
+        is_dup_ignored(Fragment(path, 2, 2))
+
+
+def test_nested_start_marker_raises(write_file: Callable[[str, str], Path]) -> None:
+    path = write_file(
+        "bad.py",
+        "# dup-ignore-start: outer\nx = 1\n# dup-ignore-start: inner\ny = 2\n# dup-ignore-end\n",
+    )
+    with pytest.raises(IgnoreMarkerError, match="nested dup-ignore-start"):
+        is_dup_ignored(Fragment(path, 2, 2))
+
+
+def test_empty_reason_start_marker_raises(write_file: Callable[[str, str], Path]) -> None:
+    # A start marker with nothing after the colon must fail on the missing reason, not on a
+    # misleading "no matching start".
+    path = write_file("bad.py", "# dup-ignore-start:\nx = 1\n# dup-ignore-end\n")
+    with pytest.raises(IgnoreMarkerError, match="requires a reason"):
+        is_dup_ignored(Fragment(path, 2, 2))
+
+
+def test_marker_not_triggered_by_prose_mention(write_file: Callable[[str, str], Path]) -> None:
+    # Prose mentioning the marker syntax (e.g. in a docstring) is not a marker: only a line's
+    # leading comment counts.
+    path = write_file(
+        "prose.py",
+        '"""See `# dup-ignore-start: reason` / `# dup-ignore-end` for the escape hatch syntax."""\n',
+    )
+    assert ignore_ranges(path) == ()
+
+
+def test_marker_not_triggered_by_own_source_file() -> None:
+    # tools/ is in PYTHON_SCAN_PATHS, and this module's docstring and regex literals mention the
+    # marker syntax, so scanning it must not register those mentions as markers.
+    self_path = Path(check_duplicate_code.__file__)
+    ignore_ranges(self_path)  # must not raise IgnoreMarkerError
+
+
+def test_validate_markers_raises_on_marker_never_seen_by_pmd(
+    write_file: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    # find_violations only parses markers on fragments inside a 3+-occurrence PMD cluster, so a
+    # malformed marker on non-duplicated code would pass silently. validate_markers parses every
+    # marker in every scanned file up front, independent of PMD.
+    path = write_file("bad.py", "def f():\n    # dup-ignore-start: never closed\n    x = 1\n")
+    with pytest.raises(IgnoreMarkerError, match="never closed"):
+        validate_markers([path], tmp_path)
+
+
+def test_validate_markers_passes_for_well_formed_marker(write_file: Callable[[str, str], Path], tmp_path: Path) -> None:
+    path = write_file(
+        "ok.py",
+        MARKED_SOURCE,
+    )
+    validate_markers([path], tmp_path)  # must not raise
+
+
+def test_find_violations_below_min_occurrences_not_flagged(
+    write_file: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    a = write_file("a.py", "def f():\n    x = 1\n    y = 2\n    z = 3\n    w = 4\n")
+    b = write_file("b.py", "def g():\n    x = 1\n    y = 2\n    z = 3\n    w = 4\n")
+    blocks = [[Fragment(a, 1, 5), Fragment(b, 1, 5)]]
+    assert find_violations(blocks, tmp_path) == []
+
+
+def test_find_violations_at_min_occurrences_flagged(write_file: Callable[[str, str], Path], tmp_path: Path) -> None:
+    a = write_file("a.py", "def f():\n    x = 1\n    y = 2\n    z = 3\n    w = 4\n")
+    b = write_file("b.py", "def g():\n    x = 1\n    y = 2\n    z = 3\n    w = 4\n")
+    c = write_file("c.py", "def h():\n    x = 1\n    y = 2\n    z = 3\n    w = 4\n")
+    blocks = [[Fragment(a, 1, 5), Fragment(b, 1, 5), Fragment(c, 1, 5)]]
+    violations = find_violations(blocks, tmp_path)
+    assert len(violations) == 1
+    assert set(violations[0]) == {Fragment(a, 1, 5), Fragment(b, 1, 5), Fragment(c, 1, 5)}
+
+
+def test_find_violations_suppressed_when_fully_dup_ignored(
+    write_file: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    marked = (
+        "def f():\n"
+        "    # dup-ignore-start: intentional shared shape\n"
+        "    x = 1\n    y = 2\n    z = 3\n"
+        "    # dup-ignore-end\n"
+    )
+    a = write_file("a.py", marked)
+    b = write_file("b.py", marked)
+    c = write_file("c.py", marked)
+    blocks = [[Fragment(a, 3, 5), Fragment(b, 3, 5), Fragment(c, 3, 5)]]
+    assert find_violations(blocks, tmp_path) == []
+
+
+def test_find_violations_not_suppressed_when_partially_dup_ignored(
+    write_file: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    marked = (
+        "def f():\n"
+        "    # dup-ignore-start: intentional shared shape\n"
+        "    x = 1\n    y = 2\n    z = 3\n    w = 4\n    v = 5\n"
+        "    # dup-ignore-end\n"
+    )
+    unmarked = "def h():\n    x = 1\n    y = 2\n    z = 3\n    w = 4\n    v = 5\n"
+    a = write_file("a.py", marked)
+    b = write_file("b.py", marked)
+    c = write_file("c.py", unmarked)
+    blocks = [[Fragment(a, 3, 7), Fragment(b, 3, 7), Fragment(c, 2, 6)]]
+    assert len(find_violations(blocks, tmp_path)) == 1
+
+
+def test_build_edges_drops_too_short_fragments(write_file: Callable[[str, str], Path], tmp_path: Path) -> None:
+    a = write_file("a.py", "x = 1\ny = 2\n")
+    b = write_file("b.py", "x = 1\ny = 2\n")
+    blocks = [[Fragment(a, 1, 2), Fragment(b, 1, 2)]]
+    assert build_edges(blocks, tmp_path) == []
+
+
+def test_build_edges_drops_boilerplate_import_only_fragment(
+    write_file: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    content = "import os\nimport sys\nimport json\nimport re\nimport ast\n"
+    a = write_file("a.py", content)
+    b = write_file("b.py", content)
+    blocks = [[Fragment(a, 1, 5), Fragment(b, 1, 5)]]
+    assert build_edges(blocks, tmp_path) == []
+
+
+def test_build_edges_drops_import_fragment_spanning_type_checking_guard(
+    write_file: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    content = (
+        "import typing\n"
+        "from a import b\n"
+        "from c import d\n"
+        "\n"
+        "if typing.TYPE_CHECKING:\n"
+        "    from e import f\n"
+        "    from g import h\n"
+    )
+    a = write_file("a.py", content)
+    b = write_file("b.py", content)
+    blocks = [[Fragment(a, 2, 7), Fragment(b, 2, 7)]]
+    assert build_edges(blocks, tmp_path) == []
+
+
+def test_build_edges_keeps_type_checking_guard_with_non_import_body(
+    write_file: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    content = (
+        "import typing\n"
+        "from a import b\n"
+        "from c import d\n"
+        "\n"
+        "if typing.TYPE_CHECKING:\n"
+        "    from e import f\n"
+        "    Alias = f\n"
+    )
+    a = write_file("a.py", content)
+    b = write_file("b.py", content)
+    blocks = [[Fragment(a, 2, 7), Fragment(b, 2, 7)]]
+    assert build_edges(blocks, tmp_path) != []
+
+
+def test_fragment_from_file_element_parses_pmd_xml() -> None:
+    xml = f"""<duplication xmlns="{CPD_NS["cpd"]}">
+        <file path="/repo/tests/foo.py" line="10" endline="20"/>
+    </duplication>"""
+    element = ET.fromstring(xml).find("cpd:file", CPD_NS)  # noqa: S314 -- trusted literal test fixture
+    assert element is not None
+    fragment = fragment_from_file_element(element)
+    assert fragment == Fragment(Path("/repo/tests/foo.py"), 10, 20)
+
+
+def test_fragment_from_file_element_missing_attribute_raises() -> None:
+    xml = f'<file xmlns="{CPD_NS["cpd"]}" path="/repo/tests/foo.py" line="10"/>'
+    element = ET.fromstring(xml)  # noqa: S314 -- trusted literal test fixture
+    with pytest.raises(ValueError, match="missing path/line/endline"):
+        fragment_from_file_element(element)
+
+
+def test_duplication_blocks_parses_multiple_occurrences() -> None:
+    xml = f"""<pmd-cpd xmlns="{CPD_NS["cpd"]}">
+        <duplication lines="10" tokens="50">
+            <file path="/repo/a.py" line="1" endline="10"/>
+            <file path="/repo/b.py" line="5" endline="14"/>
+            <file path="/repo/c.py" line="8" endline="17"/>
+        </duplication>
+    </pmd-cpd>"""
+    blocks = duplication_blocks(ET.fromstring(xml))  # noqa: S314 -- trusted literal test fixture
+    assert blocks == [
+        [
+            Fragment(Path("/repo/a.py"), 1, 10),
+            Fragment(Path("/repo/b.py"), 5, 14),
+            Fragment(Path("/repo/c.py"), 8, 17),
+        ]
+    ]
+
+
+def test_duplication_blocks_empty_report_returns_no_blocks() -> None:
+    xml = f'<pmd-cpd xmlns="{CPD_NS["cpd"]}"></pmd-cpd>'
+    assert duplication_blocks(ET.fromstring(xml)) == []  # noqa: S314 -- trusted literal test fixture
+
+
+def test_cluster_file_counts_counts_fragments_per_file() -> None:
+    component = [
+        Fragment(REPO_ROOT_STUB / "scheduler.py", 1, 5),
+        Fragment(REPO_ROOT_STUB / "scheduler.py", 20, 24),
+        Fragment(REPO_ROOT_STUB / "other.py", 1, 5),
+    ]
+    assert cluster_file_counts(component, REPO_ROOT_STUB) == Counter({Path("scheduler.py"): 2, Path("other.py"): 1})
+
+
+def test_cluster_file_counts_applies_renames() -> None:
+    component = [Fragment(REPO_ROOT_STUB / "new_name.py", 1, 5)]
+    renames = {Path("new_name.py"): Path("old_name.py")}
+    assert cluster_file_counts(component, REPO_ROOT_STUB, renames) == Counter({Path("old_name.py"): 1})
+
+
+def test_new_code_violations_flags_a_cluster_with_no_base_match() -> None:
+    # A wholly new 3-way match -- nothing in the base scan covers it at all.
+    a = Fragment(REPO_ROOT_STUB / "a.py", 1, 5)
+    b = Fragment(REPO_ROOT_STUB / "b.py", 1, 5)
+    c = Fragment(REPO_ROOT_STUB / "c.py", 1, 5)
+    violations = [[a, b, c]]
+    assert new_code_violations(violations, [], {}, REPO_ROOT_STUB) == violations
+
+
+def test_new_code_violations_ignores_a_cluster_fully_covered_by_a_base_cluster() -> None:
+    # Same three files, same per-file counts, as an existing base cluster -- e.g. a variable
+    # rename or a pure reformat (which changes a fragment's Git lines without changing which
+    # files it duplicates) must not count as new debt, however much of the diff it touches.
+    a = Fragment(REPO_ROOT_STUB / "a.py", 1, 10)
+    b = Fragment(REPO_ROOT_STUB / "b.py", 1, 10)
+    c = Fragment(REPO_ROOT_STUB / "c.py", 1, 10)
+    violations = [[a, b, c]]
+    base_counts = [Counter({Path("a.py"): 1, Path("b.py"): 1, Path("c.py"): 1})]
+    assert new_code_violations(violations, base_counts, {}, REPO_ROOT_STUB) == []
+
+
+def test_new_code_violations_flags_an_extra_occurrence_added_to_existing_debt() -> None:
+    # a/b/c already formed a violation at the merge-base; this PR adds a 4th copy in a new
+    # file. The cluster gained a member relative to any single base cluster that covers it, so
+    # it's still this PR's fault even though three of its four fragments are untouched.
+    a = Fragment(REPO_ROOT_STUB / "a.py", 1, 5)
+    b = Fragment(REPO_ROOT_STUB / "b.py", 1, 5)
+    c = Fragment(REPO_ROOT_STUB / "c.py", 1, 5)
+    new_dup = Fragment(REPO_ROOT_STUB / "new_dup.py", 1, 5)
+    violations = [[a, b, c, new_dup]]
+    base_counts = [Counter({Path("a.py"): 1, Path("b.py"): 1, Path("c.py"): 1})]
+    assert new_code_violations(violations, base_counts, {}, REPO_ROOT_STUB) == violations
+
+
+def test_new_code_violations_flags_an_extra_same_file_occurrence() -> None:
+    # scheduler.py already contributes 2 fragments to an existing cluster with other.py; this PR
+    # adds a 3rd near-identical block to scheduler.py itself. File-set matching alone would miss
+    # this (scheduler.py was already "in" the base cluster) -- per-file *counts* catch it.
+    scheduler_1 = Fragment(REPO_ROOT_STUB / "scheduler.py", 1, 5)
+    scheduler_2 = Fragment(REPO_ROOT_STUB / "scheduler.py", 20, 24)
+    scheduler_3 = Fragment(REPO_ROOT_STUB / "scheduler.py", 40, 44)
+    other = Fragment(REPO_ROOT_STUB / "other.py", 1, 5)
+    violations = [[scheduler_1, scheduler_2, scheduler_3, other]]
+    base_counts = [Counter({Path("scheduler.py"): 2, Path("other.py"): 1})]
+    assert new_code_violations(violations, base_counts, {}, REPO_ROOT_STUB) == violations
+
+
+def test_new_code_violations_flags_a_new_cluster_formed_by_a_small_edit() -> None:
+    # x/y/z weren't a 3-way match at the merge-base (each only appears in its own, unrelated
+    # base cluster) -- a small edit to x that newly joins it with y and z must still be caught,
+    # even though the edit itself is tiny relative to any one fragment's size.
+    x = Fragment(REPO_ROOT_STUB / "x.py", 1, 10)
+    y = Fragment(REPO_ROOT_STUB / "y.py", 1, 10)
+    z = Fragment(REPO_ROOT_STUB / "z.py", 1, 10)
+    violations = [[x, y, z]]
+    base_counts = [
+        Counter({Path("x.py"): 1, Path("unrelated_1.py"): 1, Path("unrelated_2.py"): 1}),
+        Counter({Path("y.py"): 1, Path("z.py"): 1, Path("unrelated_3.py"): 1}),
+    ]
+    assert new_code_violations(violations, base_counts, {}, REPO_ROOT_STUB) == violations
+
+
+def test_new_code_violations_resolves_a_head_side_rename_against_the_base_cluster() -> None:
+    a_renamed = Fragment(REPO_ROOT_STUB / "a_new_name.py", 1, 5)
+    b = Fragment(REPO_ROOT_STUB / "b.py", 1, 5)
+    c = Fragment(REPO_ROOT_STUB / "c.py", 1, 5)
+    violations = [[a_renamed, b, c]]
+    renames = {Path("a_new_name.py"): Path("a.py")}
+    base_counts = [Counter({Path("a.py"): 1, Path("b.py"): 1, Path("c.py"): 1})]
+    assert new_code_violations(violations, base_counts, renames, REPO_ROOT_STUB) == []
+
+
+def test_new_code_violations_flags_a_renamed_file_that_also_gained_an_occurrence() -> None:
+    # a_new_name.py (renamed from a.py) now contributes 2 fragments to this cluster, but the base
+    # cluster only had 1 fragment in a.py -- the rename resolves correctly, but the count still
+    # doesn't fit, so this must be flagged (composes the rename and same-file-count-increase
+    # behaviors pinned separately above).
+    a_renamed_1 = Fragment(REPO_ROOT_STUB / "a_new_name.py", 1, 5)
+    a_renamed_2 = Fragment(REPO_ROOT_STUB / "a_new_name.py", 20, 24)
+    b = Fragment(REPO_ROOT_STUB / "b.py", 1, 5)
+    c = Fragment(REPO_ROOT_STUB / "c.py", 1, 5)
+    violations = [[a_renamed_1, a_renamed_2, b, c]]
+    renames = {Path("a_new_name.py"): Path("a.py")}
+    base_counts = [Counter({Path("a.py"): 1, Path("b.py"): 1, Path("c.py"): 1})]
+    assert new_code_violations(violations, base_counts, renames, REPO_ROOT_STUB) == violations
+
+
+def test_new_code_violations_leaves_untouched_clusters_out_of_a_mixed_result() -> None:
+    new_a = Fragment(REPO_ROOT_STUB / "new_a.py", 1, 5)
+    new_b = Fragment(REPO_ROOT_STUB / "new_b.py", 1, 5)
+    new_c = Fragment(REPO_ROOT_STUB / "new_c.py", 1, 5)
+    old_a = Fragment(REPO_ROOT_STUB / "old_a.py", 1, 5)
+    old_b = Fragment(REPO_ROOT_STUB / "old_b.py", 1, 5)
+    old_c = Fragment(REPO_ROOT_STUB / "old_c.py", 1, 5)
+    new_cluster = [new_a, new_b, new_c]
+    old_cluster = [old_a, old_b, old_c]
+    base_counts = [Counter({Path("old_a.py"): 1, Path("old_b.py"): 1, Path("old_c.py"): 1})]
+    assert new_code_violations([new_cluster, old_cluster], base_counts, {}, REPO_ROOT_STUB) == [new_cluster]
+
+
+def test_scan_tree_at_ref_scans_that_refs_own_tree(git_repo: GitRepo, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check_duplicate_code, "REPO_ROOT", git_repo.root)
+
+    git_repo.write("marker.txt", "base content\n")
+    base = git_repo.commit("base")
+    git_repo.write("marker.txt", "head content, unrelated to base\n")
+    git_repo.commit("head")
+
+    seen_roots: list[Path] = []
+
+    def fake_run_scan(repo_root: Path) -> list[list[Fragment]]:
+        seen_roots.append(repo_root)
+        # Prove the materialized tree really is `base`'s content, not the live head checkout.
+        assert (repo_root / "marker.txt").read_text() == "base content\n"
+        return [[Fragment(repo_root / "a.py", 1, 5), Fragment(repo_root / "b.py", 1, 5)]]
+
+    monkeypatch.setattr(check_duplicate_code, "run_scan", fake_run_scan)
+
+    result = check_duplicate_code.scan_tree_at_ref(base)
+
+    assert result == [Counter({Path("a.py"): 1, Path("b.py"): 1})]
+    assert len(seen_roots) == 1
+    assert not seen_roots[0].exists()  # throwaway directory cleaned up after the call returns
+
+
+def test_scan_tree_at_ref_raises_a_clear_error_for_an_unresolvable_ref(
+    git_repo: GitRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check_duplicate_code, "REPO_ROOT", git_repo.root)
+    git_repo.write("a.py", "x = 1\n")
+    git_repo.commit("only commit")
+
+    with pytest.raises(RuntimeError, match="couldn't materialize"):
+        check_duplicate_code.scan_tree_at_ref("not-a-real-ref")
+
+
+def test_main_resolves_merge_base_not_a_diverged_base_ref_tip(
+    git_repo: GitRepo, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # base_ref is the PR's raw base ref, which may have moved past the PR's actual branch point
+    # by the time CI runs. main() must diff against the merge-base, not base_ref's live tip --
+    # otherwise an unrelated commit on the base branch could hide this PR's own newly-introduced
+    # duplicate (or wrongly blame it for someone else's).
+    monkeypatch.setattr(check_duplicate_code, "REPO_ROOT", git_repo.root)
+
+    git_repo.write("a.py", "shared\n" * 5)
+    git_repo.write("b.py", "shared\n" * 5)
+    git_repo.write("c.py", "shared\n" * 5)
+    branch_point = git_repo.commit("branch point")
+
+    git_repo.write("new_dup.py", "shared\n" * 5)
+    head = git_repo.commit("PR introduces a new duplicate")
+
+    # Base branch moves on, unrelated to the PR, after the branch point.
+    diverged_base_tip = git_repo.diverge("unrelated.py", "noise\n", "unrelated base branch commit", branch_point)
+
+    head_violations = [
+        [
+            Fragment(git_repo.root / "a.py", 1, 5),
+            Fragment(git_repo.root / "b.py", 1, 5),
+            Fragment(git_repo.root / "c.py", 1, 5),
+            Fragment(git_repo.root / "new_dup.py", 1, 5),
+        ]
+    ]
+    monkeypatch.setattr(check_duplicate_code, "run_scan", lambda _repo_root: head_violations)
+
+    seen_refs: list[str] = []
+
+    def fake_scan_tree_at_ref(ref: str) -> list[Counter[Path]]:
+        seen_refs.append(ref)
+        return [Counter({Path("a.py"): 1, Path("b.py"): 1, Path("c.py"): 1})]
+
+    monkeypatch.setattr(check_duplicate_code, "scan_tree_at_ref", fake_scan_tree_at_ref)
+    monkeypatch.setattr(sys, "argv", ["check_duplicate_code.py", "--gate-new-code", diverged_base_tip, head])
+
+    exit_code = check_duplicate_code.main()
+
+    assert exit_code == 1
+    assert seen_refs == [branch_point]  # the merge-base, not diverged_base_tip
+    assert "new_dup.py" in capsys.readouterr().out
+
+
+def test_main_skips_the_merge_base_scan_when_head_has_no_violations(
+    git_repo: GitRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check_duplicate_code, "REPO_ROOT", git_repo.root)
+    monkeypatch.setattr(check_duplicate_code, "run_scan", lambda _repo_root: [])
+
+    def fail_if_called(_ref: str) -> list[Counter[Path]]:
+        raise AssertionError("scan_tree_at_ref must not run when the head scan found nothing to disambiguate")
+
+    monkeypatch.setattr(check_duplicate_code, "scan_tree_at_ref", fail_if_called)
+
+    git_repo.write("a.py", "x = 1\n")
+    base = git_repo.commit("base")
+    git_repo.write("b.py", "y = 2\n")
+    head = git_repo.commit("head")
+    monkeypatch.setattr(sys, "argv", ["check_duplicate_code.py", "--gate-new-code", base, head])
+
+    assert check_duplicate_code.main() == 0
+
+
+def test_run_scan_hands_pmd_only_first_party_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A nested virtualenv inside a scanned directory (e.g. a local `tests/.venv`) must never
+    # reach PMD: walking its third-party packages exhausts PMD's Java heap.
+    (tmp_path / "tests" / ".venv" / "lib").mkdir(parents=True)
+    (tmp_path / "tests" / ".venv" / "lib" / "vendored.py").write_text("x = 1\n")
+    (tmp_path / "tests" / "test_real.py").write_text("y = 2\n")
+
+    handed_to_pmd: list[str] = []
+    pmd_cwds: list[object] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "--dir" not in cmd, "PMD must get an explicit file list, not a directory to walk"
+        # Read the list now: run_pmd_cpd deletes its temp file as soon as PMD returns.
+        file_list = Path(cmd[cmd.index("--file-list") + 1])
+        handed_to_pmd.extend(line for line in file_list.read_text().splitlines() if line)
+        pmd_cwds.append(kwargs["cwd"])
+        return subprocess.CompletedProcess(cmd, 0, stdout=f'<pmd-cpd xmlns="{CPD_NS["cpd"]}"></pmd-cpd>')
+
+    monkeypatch.setattr(check_duplicate_code, "ensure_pmd_binary", lambda: Path("/fake/pmd"))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert check_duplicate_code.run_scan(tmp_path) == []
+    assert handed_to_pmd == [str(tmp_path / "tests" / "test_real.py")]
+    # Scanning a tree other than the checkout still runs PMD from REPO_ROOT.
+    assert pmd_cwds == [check_duplicate_code.REPO_ROOT]
+
+
+def test_run_pmd_cpd_failure_includes_pmd_stderr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(2, cmd, stderr="No java executable found in PATH\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match=r"(?s)exit 2.*No java executable found in PATH"):
+        check_duplicate_code.run_pmd_cpd(Path("/fake/pmd"), "python", [], tmp_path)
+
+
+def test_python_scan_files_find_first_party_sources() -> None:
+    assert check_duplicate_code.python_scan_files(check_duplicate_code.REPO_ROOT)

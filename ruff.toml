@@ -29,6 +29,9 @@ ignore = ["ARG001", "ARG002"]
 
 [lint.per-file-ignores]
 "tests/**" = ["S101"]
+"tests/tools/**" = ["S603", "S607"]
+# CI gate scripts shell out to git, gh and house-lint by name, and download a pinned PMD release.
+"tools/**" = ["S310", "S603", "S607"]
 
 [lint.isort]
 known-first-party = ["custom_components"]

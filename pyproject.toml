@@ -6,6 +6,7 @@ requires-python = ">=3.14.2"
 
 [dependency-groups]
 dev = [
+    "house-lint>=0.2.0",
     "pyright>=1.1.408",
     "ruff>=0.14.9",
 ]
@@ -21,6 +22,25 @@ default-groups = ["dev", "test"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tools"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = "--cov=custom_components.hassette --cov-report=term-missing --cov-fail-under=95"
+
+# HSL001 AI-writing tells (divider comments, filler phrases) in comments/docstrings
+# HSL002 imports inside function/method bodies ("lazy imports")
+# HSL003 a top-level TYPE_CHECKING guard followed by a later top-level import
+# HSL004 UPPER_CASE module constants defined after the first class/function
+# HSL101 leaked spec-artifact tokens (AC#/FR#/NFR#/WP#/T##) in comments, docstrings, filenames
+# HSL102 files over max_lines (excluded from the prek hook; growth is gated by
+#        tools/check_file_size_regressions.py)
+# HSL103 except-handler bindings that aren't named 'exc' or '*_exc'
+[tool.house-lint]
+include = ["custom_components", "tests", "tools"]
+select = ["HSL001", "HSL002", "HSL003", "HSL004", "HSL101", "HSL102", "HSL103"]
+
+[tool.house-lint.rules.HSL102]
+max_lines = 800
+
+[tool.house-lint.rules.HSL103]
+allowed = ["exc", "*_exc"]

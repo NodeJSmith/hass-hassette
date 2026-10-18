@@ -59,50 +59,6 @@ ADDON_FOLLOW_ERRORS: tuple[type[HassetteClientError], ...] = (
 
 type ErrorRow = tuple[type[HassetteClientError], str]
 
-
-def truncate_detail(text: str) -> str:
-    """Shorten exception text from app code to ``MAX_DETAIL_LENGTH`` characters."""
-    if len(text) <= MAX_DETAIL_LENGTH:
-        return text
-    return text[: MAX_DETAIL_LENGTH - 1] + "…"
-
-
-def redirect_target(err: RedirectError) -> str:
-    """Return where a redirect pointed: scheme, host and path only.
-
-    Userinfo, query and fragment are dropped, since a login page's query carries state and tokens.
-    Empty when the redirect carried no ``Location`` or one that doesn't parse as a URL.
-    """
-    if not err.location:
-        return ""
-    try:
-        target = URL(err.location)
-    except ValueError:
-        return ""
-    target = target.with_query(None).with_fragment(None)
-    if target.user is None and target.password is None:
-        return str(target)
-    return str(target.with_user(None))
-
-
-def placeholders_for(err: HassetteClientError) -> dict[str, str] | None:
-    """Return the translation placeholders an error's message needs, if any (``{location}``, ``{detail}``)."""
-    if isinstance(err, RedirectError):
-        return {"location": redirect_target(err)}
-    if isinstance(err, ActionFailedError):
-        return {"detail": truncate_detail(err.detail or "")}
-    return None
-
-
-def version_placeholders(err: UnsupportedServerVersionError) -> dict[str, str]:
-    """Return the placeholders the unsupported-version messages show."""
-    return {
-        "server_version": err.server_version or "unknown",
-        "api_schema_version": str(err.api_schema_version),
-        "min_api_schema_version": str(err.min_api_schema_version),
-    }
-
-
 # Config flow form errors. A 401 is a branch, since its key depends on whether a token was sent.
 FORM_ERRORS: tuple[ErrorRow, ...] = (
     (RedirectError, "redirected"),
@@ -153,45 +109,88 @@ ACTION_VALIDATION_ERRORS: tuple[ErrorRow, ...] = (
 )
 
 
-def lookup(rows: tuple[ErrorRow, ...], err: HassetteClientError) -> str | None:
-    """Return the translation key of the first row ``err`` is an instance of."""
-    return next((key for cls, key in rows if isinstance(err, cls)), None)
+def truncate_detail(text: str) -> str:
+    """Shorten exception text from app code to ``MAX_DETAIL_LENGTH`` characters."""
+    if len(text) <= MAX_DETAIL_LENGTH:
+        return text
+    return text[: MAX_DETAIL_LENGTH - 1] + "…"
 
 
-def poll_error(err: HassetteClientError) -> HomeAssistantError:
+def redirect_target(exc: RedirectError) -> str:
+    """Return where a redirect pointed: scheme, host and path only.
+
+    Userinfo, query and fragment are dropped, since a login page's query carries state and tokens.
+    Empty when the redirect carried no ``Location`` or one that doesn't parse as a URL.
+    """
+    if not exc.location:
+        return ""
+    try:
+        target = URL(exc.location)
+    except ValueError:
+        return ""
+    target = target.with_query(None).with_fragment(None)
+    if target.user is None and target.password is None:
+        return str(target)
+    return str(target.with_user(None))
+
+
+def placeholders_for(exc: HassetteClientError) -> dict[str, str] | None:
+    """Return the translation placeholders an error's message needs, if any (``{location}``, ``{detail}``)."""
+    if isinstance(exc, RedirectError):
+        return {"location": redirect_target(exc)}
+    if isinstance(exc, ActionFailedError):
+        return {"detail": truncate_detail(exc.detail or "")}
+    return None
+
+
+def version_placeholders(exc: UnsupportedServerVersionError) -> dict[str, str]:
+    """Return the placeholders the unsupported-version messages show."""
+    return {
+        "server_version": exc.server_version or "unknown",
+        "api_schema_version": str(exc.api_schema_version),
+        "min_api_schema_version": str(exc.min_api_schema_version),
+    }
+
+
+def lookup(rows: tuple[ErrorRow, ...], exc: HassetteClientError) -> str | None:
+    """Return the translation key of the first row ``exc`` is an instance of."""
+    return next((key for cls, key in rows if isinstance(exc, cls)), None)
+
+
+def poll_error(exc: HassetteClientError) -> HomeAssistantError:
     """Map a failed coordinator poll to the error the coordinator should raise."""
-    if isinstance(err, AuthenticationError):
+    if isinstance(exc, AuthenticationError):
         return ConfigEntryAuthFailed(translation_domain=DOMAIN, translation_key="invalid_auth")
-    key = lookup(POLL_ERRORS, err)
+    key = lookup(POLL_ERRORS, exc)
     if key is None:
-        _LOGGER.debug("Unexpected error polling hassette", exc_info=err)
+        _LOGGER.debug("Unexpected error polling hassette", exc_info=exc)
         key = "unknown"
-    return UpdateFailed(translation_domain=DOMAIN, translation_key=key, translation_placeholders=placeholders_for(err))
+    return UpdateFailed(translation_domain=DOMAIN, translation_key=key, translation_placeholders=placeholders_for(exc))
 
 
-def action_error(err: HassetteClientError) -> HomeAssistantError:
+def action_error(exc: HassetteClientError) -> HomeAssistantError:
     """Map a failed app action to the error the entity action should raise."""
-    if (key := lookup(ACTION_VALIDATION_ERRORS, err)) is not None:
+    if (key := lookup(ACTION_VALIDATION_ERRORS, exc)) is not None:
         return ServiceValidationError(translation_domain=DOMAIN, translation_key=key)
-    if isinstance(err, ConflictError) and err.code == ACTION_IN_PROGRESS_CODE:
+    if isinstance(exc, ConflictError) and exc.code == ACTION_IN_PROGRESS_CODE:
         key = "action_in_progress"
-    elif (key := lookup(ACTION_ERRORS, err)) is None:
-        _LOGGER.error("Unexpected error from a hassette app action", exc_info=err)
+    elif (key := lookup(ACTION_ERRORS, exc)) is None:
+        _LOGGER.error("Unexpected error from a hassette app action", exc_info=exc)
         key = "unknown"
     return HomeAssistantError(
-        translation_domain=DOMAIN, translation_key=key, translation_placeholders=placeholders_for(err)
+        translation_domain=DOMAIN, translation_key=key, translation_placeholders=placeholders_for(exc)
     )
 
 
-def is_completed_action(err: HassetteClientError) -> bool:
+def is_completed_action(exc: HassetteClientError) -> bool:
     """Whether hassette answered 2xx with JSON, so the action ran and only its response failed to parse.
 
     A 2xx that isn't JSON (``UnexpectedResponseError``) most likely came from something in front of
     hassette, so whether the action ran is unknown.
     """
     return (
-        isinstance(err, ResponseValidationError)
-        and not isinstance(err, UnexpectedResponseError)
-        and err.status is not None
-        and 200 <= err.status < 300
+        isinstance(exc, ResponseValidationError)
+        and not isinstance(exc, UnexpectedResponseError)
+        and exc.status is not None
+        and 200 <= exc.status < 300
     )

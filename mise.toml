@@ -1,4 +1,5 @@
 [tools]
+java = "temurin-21"
 prek = "0.5.5"
 python = ["3.14.8"]
 uv = "latest"
