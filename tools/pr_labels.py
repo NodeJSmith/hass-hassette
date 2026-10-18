@@ -59,5 +59,5 @@ def apply_label_override(exit_code: int, label: str, pr: str | None = None) -> i
     if label not in labels:
         return exit_code
     print()
-    print(f"ALLOWED: the regression above was allowed by the '{label}' label on PR #{pr}.")
+    print(f"ALLOWED: the failure above was allowed by the '{label}' label on PR #{pr}.")
     return 0

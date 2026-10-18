@@ -66,6 +66,8 @@ jobs:
               run: prek run --all-files --hook-stage pre-push --show-diff-on-failure --skip gitleaks-tree --skip check-file-size-regressions --skip check-duplicate-code
 
     file-sizes:
+        # A push to main only lands through a PR that was gated already, so there is nothing to diff.
+        if: github.event_name == 'pull_request'
         runs-on: ubuntu-latest
         timeout-minutes: 10
         permissions:
@@ -91,9 +93,7 @@ jobs:
             - run: uv sync --locked
 
             - name: Check for new file-size regressions
-              # A push to main only lands through a PR that was gated already, so there is nothing to diff.
               # A failing result passes when the PR carries the script's ALLOW_LABEL.
-              if: github.event_name == 'pull_request'
               env:
                   PR_NUMBER: ${{ github.event.pull_request.number }}
                   GH_TOKEN: ${{ github.token }}
@@ -140,7 +140,9 @@ jobs:
               run: uv run python tools/check_duplicate_code.py --gate-new-code "$BASE_SHA" "$HEAD_SHA"
 
             - name: Report duplicate code backlog
+              # Informational: the backlog is reported but the PR gate above is what blocks.
               if: github.event_name != 'pull_request'
+              continue-on-error: true
               run: uv run python tools/check_duplicate_code.py
 
     security:

@@ -1,7 +1,7 @@
 """Characterization tests for tools/check_duplicate_code.py.
 
 Pin the pure logic — union-find clustering, the docstring/import boilerplate exemption, the
-codegen-directory/marker exclusion, the `dup-ignore-start`/`dup-ignore-end` escape hatch (including
+self-exclusion, the `dup-ignore-start`/`dup-ignore-end` escape hatch (including
 its error paths), PMD XML parsing, and the `--gate-new-code` merge-base cluster comparison —
 without invoking the real PMD binary or network.
 """
@@ -84,12 +84,6 @@ def test_is_dup_ignore_file_python(write_file: Callable[[str, str], Path], tmp_p
     assert is_dup_ignore_file(path, tmp_path) is True
 
 
-def test_is_dup_ignore_file_typescript(write_file: Callable[[str, str], Path], tmp_path: Path) -> None:
-    path = write_file("ignored.ts", "// dup-ignore-file: MSW handlers mirror route structure\nexport {};\n")
-    is_dup_ignore_file.cache_clear()
-    assert is_dup_ignore_file(path, tmp_path) is True
-
-
 def test_is_dup_ignore_file_false_for_ordinary(write_file: Callable[[str, str], Path], tmp_path: Path) -> None:
     path = write_file("normal.py", "x = 1\n")
     is_dup_ignore_file.cache_clear()
@@ -133,18 +127,6 @@ def test_is_dup_ignored_false_outside_marker_range(write_file: Callable[[str, st
         "def f():\n    # dup-ignore-start: shared setup pattern, intentional\n    x = 1\n    # dup-ignore-end\n",
     )
     assert is_dup_ignored(Fragment(path, 1, 1)) is False
-
-
-def test_dup_ignore_marker_recognized_with_slash_comment_syntax(write_file: Callable[[str, str], Path]) -> None:
-    path = write_file(
-        "ok.ts",
-        "function f() {\n"
-        "  // dup-ignore-start: shared setup pattern, intentional\n"
-        "  const x = 1;\n"
-        "  // dup-ignore-end\n"
-        "}\n",
-    )
-    assert is_dup_ignored(Fragment(path, 3, 3)) is True
 
 
 def test_unbalanced_start_marker_raises(write_file: Callable[[str, str], Path]) -> None:
@@ -582,7 +564,7 @@ def test_main_skips_the_merge_base_scan_when_head_has_no_violations(
 
 
 def test_run_scan_hands_pmd_only_first_party_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # A nested virtualenv inside a scanned directory (e.g. a local `codegen/.venv`) must never
+    # A nested virtualenv inside a scanned directory (e.g. a local `tests/.venv`) must never
     # reach PMD: walking its third-party packages exhausts PMD's Java heap.
     (tmp_path / "tests" / ".venv" / "lib").mkdir(parents=True)
     (tmp_path / "tests" / ".venv" / "lib" / "vendored.py").write_text("x = 1\n")

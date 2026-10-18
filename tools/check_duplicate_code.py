@@ -22,8 +22,7 @@ Everything else surfaces. For an accepted occurrence, wrap it in a marker pair:
     ...block...
     # dup-ignore-end
 
-(This example is itself live input to the parser, since this module scans its own source. It is a
-balanced pair, so it is harmless; keep any doc examples of the marker syntax balanced.)
+(This module is excluded from its own scan, so these examples are never parsed.)
 
 For a file that is intentional duplication throughout, a single file-level marker excludes every
 fragment from that file:
@@ -45,7 +44,7 @@ the head tree and, only when that finds a violation, also scans a throwaway extr
 merge-base tree (`scan_tree_at_ref()`), then reports only the head clusters that don't already
 match a merge-base cluster (see `new_code_violations()`).
 Needs Java 21+ on PATH, since PMD CPD is a JVM tool. The first run downloads a pinned PMD
-distribution (~50MB) to a shared cache (`$XDG_CACHE_HOME/hass-hass-hassette-dev-tools/pmd/`, default
+distribution (~50MB) to a shared cache (`$XDG_CACHE_HOME/hass-hassette-dev-tools/pmd/`, default
 `~/.cache`) and verifies it against a pinned sha256.
 
 Wired into CI (`.github/workflows/lint.yml`) as a `--gate-new-code` step that fails only when the
@@ -95,9 +94,9 @@ ALLOW_LABEL = "lint:duplicate-code-allowed"
 DOWNLOAD_TIMEOUT_SECONDS = 30
 PMD_TIMEOUT_SECONDS = 300
 
-IGNORE_START_RE = re.compile(r"^\s*(?:#|//)\s*dup-ignore-start:\s*(.*)$")
-IGNORE_END_RE = re.compile(r"^\s*(?:#|//)\s*dup-ignore-end\b")
-IGNORE_FILE_RE = re.compile(r"^\s*(?:#|//)\s*dup-ignore-file:\s*(.*)$")
+IGNORE_START_RE = re.compile(r"^\s*#\s*dup-ignore-start:\s*(.*)$")
+IGNORE_END_RE = re.compile(r"^\s*#\s*dup-ignore-end\b")
+IGNORE_FILE_RE = re.compile(r"^\s*#\s*dup-ignore-file:\s*(.*)$")
 
 # Repo-root-relative: --gate-new-code scans a throwaway checkout of the merge-base tree under its
 # own temp root, so this must resolve against whichever root is being scanned.
@@ -202,8 +201,7 @@ def is_too_short(fragment: Fragment) -> bool:
 def ignore_ranges(path: Path) -> tuple[tuple[int, int], ...]:
     """Return every (start_line, end_line) range wrapped in a dup-ignore-start/end pair.
 
-    Marker text is matched verbatim regardless of comment syntax (# vs //), so the same
-    convention.
+    A marker only counts as the line's leading `#` comment.
     """
     try:
         lines = path.read_text().splitlines()
@@ -248,14 +246,13 @@ def validate_markers(files: list[Path], repo_root: Path) -> None:
     `is_dup_ignore_file`/`ignore_ranges` already raise `IgnoreMarkerError` for a malformed marker,
     but `find_violations` only calls them on fragments PMD found duplicated 3+ times. A malformed
     marker on code that PMD never flags as a clone — because the block genuinely appears only once
-    or twice, or the fragment predates the marker going stale — would otherwise pass silently.
+    or twice, — would otherwise pass silently.
     Calling both eagerly here, over every scanned file, closes that gap; both are `functools.cache`d
     so the later calls during clustering are free.
 
     Skips exactly the files `is_dropped` treats as out-of-scope before it ever reaches a marker
-    check (`is_self`) —
-    those files' duplication is never evaluated, so a marker sitting in one, malformed or not, is
-    never load-bearing and shouldn't fail CI on its own.
+    check (`is_self`): that file's duplication is never evaluated, so a marker sitting in it,
+    malformed or not, is never load-bearing and shouldn't fail CI on its own.
     """
     for path in files:
         if is_self(path, repo_root):
@@ -277,8 +274,7 @@ def ensure_pmd_binary() -> Path:
     """
     if shutil.which("java") is None:
         raise RuntimeError(
-            "check_duplicate_code.py needs Java 21+ on PATH to run PMD CPD (the clone detector). "
-            "Install it (e.g. `mise install java`) and retry."
+            "check_duplicate_code.py needs Java 21+ on PATH to run PMD CPD (the clone detector). Install it and retry."
         )
 
     install_dir = pmd_cache_root()
@@ -291,7 +287,7 @@ def ensure_pmd_binary() -> Path:
     os.close(fd)
     tmp_path = Path(tmp_name)
     try:
-        with urllib.request.urlopen(PMD_DIST_URL, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:  # noqa: S310 - fixed https URL
+        with urllib.request.urlopen(PMD_DIST_URL, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
             tmp_path.write_bytes(response.read())
         digest = hashlib.sha256(tmp_path.read_bytes()).hexdigest()
         if digest != PMD_DIST_SHA256:
@@ -310,10 +306,9 @@ def run_pmd_cpd(pmd_binary: Path, language: str, files: list[Path], scan_root: P
     """Run PMD CPD over exactly `files`, passed as an explicit `--file-list` of absolute paths.
 
     An explicit list, rather than PMD walking directories itself, keeps `EXCLUDED_PARTS` (nested
-    virtualenvs, `node_modules`) out of the scan. `scan_root` is the tree `files` came from (the
+    virtualenvs) out of the scan. `scan_root` is the tree `files` came from (the
     checkout or a merge-base extraction) and only labels errors. PMD itself always runs from
-    REPO_ROOT, because Java comes from the checkout's mise config and the `java` shim resolves
-    nothing outside it.
+    REPO_ROOT.
     """
     with tempfile.TemporaryDirectory() as tmp:
         file_list = Path(tmp) / "files.txt"
@@ -461,7 +456,7 @@ def new_code_violations(
     cluster is pre-existing only if some single merge-base cluster already contained every one
     of its (file, occurrence-count) pairs — comparing *counts*, not just file identity, so
     adding a new copy to a file that already contributed multiple fragments to an existing
-    cluster (e.g. scheduler.py's several same-file convenience-method duplicates) still counts
+    cluster (e.g. several same-file copies of a test setup block) still counts
     as new debt rather than being masked by the file's pre-existing membership. A cluster
     lacking a fully-covering base match is reported as PR-introduced, whether that's because it
     gained a member (an extra occurrence added to existing debt) or never existed at all (a
@@ -497,9 +492,9 @@ def scan_tree_at_ref(ref: str) -> list[Counter[Path]]:
     """Materialize `ref`'s tree into a throwaway directory, scan it, and return each violation
     cluster's per-file fragment counts (see `cluster_file_counts()`).
 
-    Used to compute the PR's merge-base violation "shape" for `--gate-new-code`: `new_code_
-    violations()` only needs to know, per cluster, which files contributed how many fragments —
-    not the fragments' exact text or line ranges — so returning counts here (rather than raw
+    Used to compute the PR's merge-base violation "shape" for `--gate-new-code`:
+    `new_code_violations()` only needs to know, per cluster, which files contributed how many
+    fragments, not the fragments' exact text or line ranges — so returning counts here (rather than raw
     `Fragment`s tied to a temp directory that's about to be deleted) keeps the caller from ever
     needing to know this function's throwaway root path.
 
@@ -510,12 +505,11 @@ def scan_tree_at_ref(ref: str) -> list[Counter[Path]]:
     `run_scan()`.
     """
     with tempfile.TemporaryDirectory(prefix="check-duplicate-code-base-") as tmp_name:
-        tmp_root = Path(
-            tmp_name
-        ).resolve()  # fragments are keyed relative to this; macOS/Windows temp dirs are symlinked
+        # Fragments are keyed relative to this; macOS/Windows temp dirs are symlinked.
+        tmp_root = Path(tmp_name).resolve()
         try:
             archive = subprocess.run(["git", "archive", ref], cwd=REPO_ROOT, capture_output=True, check=True)
-            subprocess.run(["tar", "-x"], cwd=tmp_root, input=archive.stdout, check=True)
+            subprocess.run(["tar", "-x"], cwd=tmp_root, input=archive.stdout, capture_output=True, check=True)
         except subprocess.CalledProcessError as exc:
             raise RuntimeError(
                 f"couldn't materialize {ref}'s tree for the merge-base scan "

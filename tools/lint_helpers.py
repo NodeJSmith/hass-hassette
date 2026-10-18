@@ -14,10 +14,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: Directory components that are never first-party source: virtualenvs, caches, and build output.
-#: Without this filter, a stray nested virtualenv inside any scan dir pulls third-party
-#: site-packages into rglob and reports them as house-style violations, which fails the linters'
-#: own characterization tests.
-EXCLUDED_PARTS = frozenset({".venv", "site-packages", "__pycache__", ".nox", ".git", "node_modules"})
+#: Without this filter, a stray nested virtualenv inside a scan dir pulls third-party
+#: site-packages into rglob and reports them as findings.
+EXCLUDED_PARTS = frozenset({".venv", "site-packages", "__pycache__", ".nox", ".git"})
 
 #: A unified-diff hunk header, e.g. "@@ -a,b +c,d @@" — b/d default to 1 when omitted (git's
 #: convention for a single-line hunk). Used by git_changed_line_ranges() below.
@@ -63,9 +62,9 @@ def iter_py_files(repo_root: Path, scan_dirs: list[str]) -> list[Path]:
 
 # Git-diff helpers for "new code" CI gates — checkers that must flag only a violation this PR's
 # own commits introduced, not pre-existing debt the PR happens to sit near. Shared here (rather
-# than duplicated per checker) because both the file-size and duplicate-code gates need the same
-# three primitives: where the PR actually branched off, which lines it added, and what a file
-# looked like before it did.
+# than duplicated per gate) because both the file-size and duplicate-code gates need the merge-base
+# and rename primitives; the file-size gate also reads which lines changed and what a file looked
+# like before the PR.
 
 
 def git_merge_base(repo_root: Path, base_ref: str, head_ref: str) -> str:

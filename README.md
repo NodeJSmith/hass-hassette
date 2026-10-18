@@ -173,7 +173,7 @@ prek install -t pre-commit -t pre-push    # lint on commit; pyright, a secret sc
 uv run pytest
 ```
 
-The duplicate-code gate on push needs Java 21 on `PATH` (PMD CPD is a JVM tool). A PR that has to grow an
+The duplicate-code gate on push needs Java 21 (PMD CPD is a JVM tool); `mise install` provides it. A PR that has to grow an
 oversized file or add duplication on purpose can carry the `lint:file-size-allowed` or
 `lint:duplicate-code-allowed` label.
 
