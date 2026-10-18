@@ -13,14 +13,6 @@ hooks = [
 ]
 
 [[repos]]
-repo = "https://github.com/astral-sh/ruff-pre-commit"
-rev = "v0.16.10"
-hooks = [
-    { id = "ruff-check", args = ["--fix"] },
-    { id = "ruff-format" },
-]
-
-[[repos]]
 repo = "https://github.com/crate-ci/typos"
 rev = "v1.46.3"
 hooks = [
@@ -48,6 +40,21 @@ hooks = [
 
 [[repos]]
 repo = "local"
+
+# Run through uv so the hooks use the ruff pinned in uv.lock rather than a second copy.
+[[repos.hooks]]
+id = "ruff-check"
+name = "ruff check"
+language = "system"
+entry = "uv run ruff check --fix"
+types = ["python"]
+
+[[repos.hooks]]
+id = "ruff-format"
+name = "ruff format"
+language = "system"
+entry = "uv run ruff format"
+types = ["python"]
 
 [[repos.hooks]]
 id = "pyright"
