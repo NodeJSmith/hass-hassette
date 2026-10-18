@@ -37,6 +37,7 @@ from check_duplicate_code import (
 from .conftest import GitRepo
 
 REPO_ROOT_STUB = Path("/repo")
+MARKED_SOURCE = "def f():\n    # dup-ignore-start: shared setup pattern, intentional\n    x = 1\n    # dup-ignore-end\n"
 
 
 @pytest.fixture
@@ -79,7 +80,7 @@ def test_is_too_short_at_min_lines() -> None:
 
 
 def test_is_dup_ignore_file_python(write_file: Callable[[str, str], Path], tmp_path: Path) -> None:
-    path = write_file("ignored.py", "# dup-ignore-file: HA helper models share fields by API design\nx = 1\n")
+    path = write_file("ignored.py", "# dup-ignore-file: sibling entities share fields by design\nx = 1\n")
     is_dup_ignore_file.cache_clear()
     assert is_dup_ignore_file(path, tmp_path) is True
 
@@ -116,7 +117,7 @@ def test_is_dup_ignore_file_false_for_self() -> None:
 def test_is_dup_ignored_true_inside_marker_range(write_file: Callable[[str, str], Path]) -> None:
     path = write_file(
         "ok.py",
-        "def f():\n    # dup-ignore-start: shared setup pattern, intentional\n    x = 1\n    # dup-ignore-end\n",
+        MARKED_SOURCE,
     )
     assert is_dup_ignored(Fragment(path, 3, 3)) is True
 
@@ -124,7 +125,7 @@ def test_is_dup_ignored_true_inside_marker_range(write_file: Callable[[str, str]
 def test_is_dup_ignored_false_outside_marker_range(write_file: Callable[[str, str], Path]) -> None:
     path = write_file(
         "ok.py",
-        "def f():\n    # dup-ignore-start: shared setup pattern, intentional\n    x = 1\n    # dup-ignore-end\n",
+        MARKED_SOURCE,
     )
     assert is_dup_ignored(Fragment(path, 1, 1)) is False
 
@@ -151,19 +152,16 @@ def test_nested_start_marker_raises(write_file: Callable[[str, str], Path]) -> N
 
 
 def test_empty_reason_start_marker_raises(write_file: Callable[[str, str], Path]) -> None:
-    # Regression: the marker regex used to require a non-empty reason to match at all, so
-    # "# dup-ignore-start:" with nothing after the colon silently failed to register as a
-    # marker — the checker error then pointed at the wrong problem ("no matching start")
-    # instead of the real one (empty reason). It must now fail loudly and specifically.
+    # A start marker with nothing after the colon must fail on the missing reason, not on a
+    # misleading "no matching start".
     path = write_file("bad.py", "# dup-ignore-start:\nx = 1\n# dup-ignore-end\n")
     with pytest.raises(IgnoreMarkerError, match="requires a reason"):
         is_dup_ignored(Fragment(path, 2, 2))
 
 
 def test_marker_not_triggered_by_prose_mention(write_file: Callable[[str, str], Path]) -> None:
-    # Regression: the marker regex used to match as a plain substring anywhere on the line, so
-    # prose *mentioning* the marker syntax (e.g. explaining it in a docstring) registered as a
-    # real marker. It must only count as the line's actual leading comment.
+    # Prose mentioning the marker syntax (e.g. in a docstring) is not a marker: only a line's
+    # leading comment counts.
     path = write_file(
         "prose.py",
         '"""See `# dup-ignore-start: reason` / `# dup-ignore-end` for the escape hatch syntax."""\n',
@@ -172,10 +170,8 @@ def test_marker_not_triggered_by_prose_mention(write_file: Callable[[str, str], 
 
 
 def test_marker_not_triggered_by_own_source_file() -> None:
-    # Regression, reproduced directly against the checker's own source: tools/ is itself in
-    # PYTHON_SCAN_PATHS, and this file's docstring explanation of the marker syntax plus
-    # IGNORE_START_RE/IGNORE_END_RE's own literal pattern text used to trip the marker parser
-    # on itself (raised "nested dup-ignore-start" scanning its own module docstring).
+    # tools/ is in PYTHON_SCAN_PATHS, and this module's docstring and regex literals mention the
+    # marker syntax, so scanning it must not register those mentions as markers.
     self_path = Path(check_duplicate_code.__file__)
     ignore_ranges(self_path)  # must not raise IgnoreMarkerError
 
@@ -183,11 +179,9 @@ def test_marker_not_triggered_by_own_source_file() -> None:
 def test_validate_markers_raises_on_marker_never_seen_by_pmd(
     write_file: Callable[[str, str], Path], tmp_path: Path
 ) -> None:
-    # Regression for the gap chatgpt-codex-connector flagged on PR #1572: find_violations only
-    # calls is_dup_ignored/ignore_ranges on fragments inside a 3+-occurrence PMD cluster, so a
-    # malformed marker on code with no duplication at all — never seen by PMD, so never on that
-    # path — used to pass the checker silently. validate_markers is the eager, PMD-independent
-    # pass that closes the gap by parsing every marker in every scanned file up front.
+    # find_violations only parses markers on fragments inside a 3+-occurrence PMD cluster, so a
+    # malformed marker on non-duplicated code would pass silently. validate_markers parses every
+    # marker in every scanned file up front, independent of PMD.
     path = write_file("bad.py", "def f():\n    # dup-ignore-start: never closed\n    x = 1\n")
     with pytest.raises(IgnoreMarkerError, match="never closed"):
         validate_markers([path], tmp_path)
@@ -196,7 +190,7 @@ def test_validate_markers_raises_on_marker_never_seen_by_pmd(
 def test_validate_markers_passes_for_well_formed_marker(write_file: Callable[[str, str], Path], tmp_path: Path) -> None:
     path = write_file(
         "ok.py",
-        "def f():\n    # dup-ignore-start: shared setup pattern, intentional\n    x = 1\n    # dup-ignore-end\n",
+        MARKED_SOURCE,
     )
     validate_markers([path], tmp_path)  # must not raise
 
@@ -586,7 +580,7 @@ def test_run_scan_hands_pmd_only_first_party_files(tmp_path: Path, monkeypatch: 
 
     assert check_duplicate_code.run_scan(tmp_path) == []
     assert handed_to_pmd == [str(tmp_path / "tests" / "test_real.py")]
-    # Scanning a tree other than the checkout still runs PMD from REPO_ROOT, where mise provides Java.
+    # Scanning a tree other than the checkout still runs PMD from REPO_ROOT.
     assert pmd_cwds == [check_duplicate_code.REPO_ROOT]
 
 

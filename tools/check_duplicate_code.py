@@ -448,11 +448,8 @@ def new_code_violations(
 ) -> list[list[Fragment]]:
     """Return the subset of `head_violations` this PR's own diff is responsible for.
 
-    Earlier versions of this gate inferred "is this cluster new" from how much of a fragment's
-    *lines* the PR's diff touched — a proxy that both false-positived (reformatting an existing
-    occurrence rewrites most of its lines without changing what it duplicates) and false-
-    negatived (a single-line edit can turn a previously-unrelated pair into a brand-new 3-way
-    match, at near-zero line overlap). This compares actual violation sets instead: a head
+    Compares violation sets rather than diff line overlap, which misjudges both a reformat of an
+    existing occurrence and a one-line edit that turns an unrelated pair into a 3-way match. A head
     cluster is pre-existing only if some single merge-base cluster already contained every one
     of its (file, occurrence-count) pairs — comparing *counts*, not just file identity, so
     adding a new copy to a file that already contributed multiple fragments to an existing

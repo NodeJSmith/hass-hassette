@@ -23,8 +23,8 @@ EXCLUDED_PARTS = frozenset({".venv", "site-packages", "__pycache__", ".nox", ".g
 _HUNK_HEADER_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))? @@")
 
 #: git's own wording for "the path isn't in that tree" (as opposed to "the ref itself doesn't
-#: resolve", e.g. an unfetched commit) — verified directly against git's actual stderr output,
-#: not guessed. Both phrasings appear depending on whether the path exists in the working tree.
+#: resolve", e.g. an unfetched commit). Both phrasings appear, depending on whether the path
+#: exists in the working tree.
 #: Used by git_file_line_count_at() below.
 _GIT_SHOW_MISSING_PATH_MARKERS = ("does not exist in", "exists on disk, but not in")
 

@@ -136,16 +136,16 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         self.update_app_devices(usable, hub_id)
         return HassetteData(health=health, apps={app.app_key: app for app in usable})
 
-    async def follow_addon(self, err: HassetteClientError) -> None:
+    async def follow_addon(self, exc: HassetteClientError) -> None:
         """After a rejected token or an unreachable server, repoint a discovered entry at what its add-on announces.
 
         Only an entry created from discovery holds a slug, and only that add-on's info is read, so no other
         add-on can repoint the entry. When the announced URL or token differs from the stored one, the entry
         is updated, a reload is scheduled to connect with it, and ``UpdateFailed`` ends this poll. Otherwise
-        this returns and the caller reports ``err`` as usual, which starts reauth for a 401.
+        this returns and the caller reports ``exc`` as usual, which starts reauth for a 401.
         """
         entry = self.config_entry
-        if not isinstance(err, ADDON_FOLLOW_ERRORS) or (slug := entry.data.get(CONF_ADDON_SLUG)) is None:
+        if not isinstance(exc, ADDON_FOLLOW_ERRORS) or (slug := entry.data.get(CONF_ADDON_SLUG)) is None:
             return
         announced = await async_read_announced_connection(self.hass, slug)
         if announced is None or all(entry.data.get(key) == value for key, value in announced.items()):
@@ -153,7 +153,7 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         _LOGGER.info("The hassette add-on %s announces a new URL or token; reconnecting with it", slug)
         self.hass.config_entries.async_update_entry(entry, data={**entry.data, **announced})
         self.hass.config_entries.async_schedule_reload(entry.entry_id)
-        raise UpdateFailed(translation_domain=DOMAIN, translation_key="addon_refreshed") from err
+        raise UpdateFailed(translation_domain=DOMAIN, translation_key="addon_refreshed") from exc
 
     def usable_app_key(self, app_key: str) -> bool:
         """Whether ``app_key`` is in hassette's alphabet; logs each one that isn't, once."""
@@ -205,7 +205,7 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
                 API_SCHEMA_VERSION,
             )
 
-    def create_version_issue(self, err: UnsupportedServerVersionError) -> None:
+    def create_version_issue(self, exc: UnsupportedServerVersionError) -> None:
         """Tell the user in Repairs that hassette needs an upgrade."""
         ir.async_create_issue(
             self.hass,
@@ -214,7 +214,7 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
             is_fixable=False,
             severity=ir.IssueSeverity.ERROR,
             translation_key=ISSUE_UNSUPPORTED_VERSION,
-            translation_placeholders=version_placeholders(err),
+            translation_placeholders=version_placeholders(exc),
             learn_more_url=UPGRADE_DOCS_URL,
         )
 
