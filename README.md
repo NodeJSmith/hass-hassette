@@ -173,9 +173,7 @@ prek install -t pre-commit -t pre-push    # lint on commit; pyright, a secret sc
 uv run pytest
 ```
 
-The duplicate-code gate on push needs Java 21 (PMD CPD is a JVM tool); `mise install` provides it. A PR that has to grow an
-oversized file or add duplication on purpose can carry the `lint:file-size-allowed` or
-`lint:duplicate-code-allowed` label.
+The duplicate-code gate on push needs Java 21 (PMD CPD is a JVM tool); `mise install` provides it.
 
 CI runs the tests against the newest Home Assistant and against the oldest one `hacs.json` claims,
 plus hassfest and HACS validation. Releases are cut by release-please; each GitHub release carries the
