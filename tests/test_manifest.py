@@ -26,4 +26,4 @@ def test_server_floor_is_unchanged() -> None:
     When this fails, release the bump deliberately: a ``feat!`` commit and the README's hassette
     requirement updated to the release that introduced the new schema, then update this number.
     """
-    assert MIN_API_SCHEMA_VERSION == 1
+    assert MIN_API_SCHEMA_VERSION == 2

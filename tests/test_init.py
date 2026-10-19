@@ -45,7 +45,7 @@ async def test_setup_registers_devices(hass: HomeAssistant, loaded_entry: MockCo
     assert app is not None
     assert (hub.name, hub.sw_version, hub.configuration_url, hub.entry_type) == (
         "Hassette",
-        "0.56.0",
+        "0.58.0",
         URL,
         DeviceEntryType.SERVICE,
     )
@@ -117,7 +117,7 @@ async def test_too_old_server_raises_repair_until_upgraded(
     assert issue.translation_placeholders == {
         "server_version": "0.40.0",
         "api_schema_version": "0",
-        "min_api_schema_version": "1",
+        "min_api_schema_version": "2",
     }
 
     client.get_health.return_value = make_health()
