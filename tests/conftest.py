@@ -42,8 +42,8 @@ def make_health(**overrides: Any) -> SystemStatusResponse:
         "uptime_seconds": 100.0,
         "entity_count": 10,
         "app_count": 2,
-        "version": "0.58.0",
-        "api_schema_version": 2,
+        "version": "0.60.0",
+        "api_schema_version": 3,
     }
     return SystemStatusResponse.model_validate(data | overrides, context=LENIENT_CONTEXT)
 

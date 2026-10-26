@@ -122,12 +122,12 @@ async def test_downgrade_while_running_raises_repair(
 async def test_server_upgrade_updates_hub_version(
     hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
 ) -> None:
-    client.get_health.return_value = make_health(version="0.57.0", api_schema_version=2)
+    client.get_health.return_value = make_health(version="0.61.0", api_schema_version=4)
     await poll(hass, freezer)
 
     hub = dr.async_get(hass).async_get_device_by_identifier((DOMAIN, SERVER_DEVICE_ID), ENTRY_ID)
     assert hub is not None
-    assert hub.sw_version == "0.57.0"
+    assert hub.sw_version == "0.61.0"
     # A newer schema keeps working.
     assert hass.states.get(SWITCH).state == STATE_ON
 
