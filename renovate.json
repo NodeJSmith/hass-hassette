@@ -28,6 +28,17 @@
       ]
     },
     {
+      "description": "Python follows Home Assistant's supported version, so only patch bumps are automatic.",
+      "matchPackageNames": [
+        "python"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "major"
+      ],
+      "enabled": false
+    },
+    {
       "description": "Dev and CI dependencies don't reach users and stay out of the changelog.",
       "matchPackageNames": [
         "!hassette-client"
