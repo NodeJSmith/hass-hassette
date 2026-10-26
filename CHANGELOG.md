@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.3.0...v0.4.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* The integration now requires hassette 0.60 or newer. An older hassette server gets a repair asking you to upgrade it.
+
+### Features
+
+* require hassette 0.60 by moving to hassette-client 0.60.0 ([#26](https://github.com/NodeJSmith/hass-hassette/issues/26)) ([5e6d480](https://github.com/NodeJSmith/hass-hassette/commit/5e6d48025f42df9226c0d19d76d5aea6683edb44))
+
 ## [0.3.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.2.0...v0.3.0) (2026-10-19)
 
 
