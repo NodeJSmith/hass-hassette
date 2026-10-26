@@ -1,31 +1,29 @@
 # Changelog
 
+## [0.4.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.3.0...v0.4.0) (2026-10-26)
+
+### Breaking Changes
+
+- **Requires hassette 0.60 or newer.** The integration now uses hassette-client 0.60.0, which needs the API schema first served by hassette 0.60.0. Upgrade your hassette server before updating the integration. With an older server, Home Assistant raises a repair asking you to upgrade it. (#26)
+
 ## [0.3.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.2.0...v0.3.0) (2026-10-19)
 
+### Breaking Changes
 
-### ⚠ BREAKING CHANGES
-
-* The integration now requires hassette 0.58 or newer. An older hassette server gets a repair asking you to upgrade it.
-
-### Features
-
-* support hassette 0.59 by moving to hassette-client 0.59.0 ([#21](https://github.com/NodeJSmith/hass-hassette/issues/21)) ([9e4352f](https://github.com/NodeJSmith/hass-hassette/commit/9e4352f70c7f4776b0676d7bbad8b604cea5728e))
+- **Requires hassette 0.58 or newer.** hassette 0.59 stopped sending the `role` field in its health response, which v0.2.0 required, so setup failed with `cannot_connect` against hassette 0.59. The integration now uses hassette-client 0.59.0, which reads the new response, and needs the API schema first served by hassette 0.58.0. With an older server, Home Assistant raises a repair asking you to upgrade it. (#21)
 
 ## [0.2.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.1.0...v0.2.0) (2026-10-17)
 
-
 ### Features
 
-* pair with the hassette add-on through Supervisor discovery ([#13](https://github.com/NodeJSmith/hass-hassette/issues/13)) ([0ab8af5](https://github.com/NodeJSmith/hass-hassette/commit/0ab8af5160d6c73d8af7cf349dd451eeca992b83))
-
+- **Pair with the hassette add-on in one step.** On Home Assistant OS, the hassette add-on announces itself through Supervisor discovery, so a **Discovered** card appears and you pair with one confirmation instead of typing a hostname and token. After pairing, the integration follows the add-on: if the add-on's URL or token changes, it picks up the new connection without any input from you. Entries you set up by hand never contact Supervisor. (#13)
 
 ### Bug Fixes
 
-* **deps:** update dependency hassette-client to v0.57.0 ([#11](https://github.com/NodeJSmith/hass-hassette/issues/11)) ([3c07b70](https://github.com/NodeJSmith/hass-hassette/commit/3c07b70265560b419e90ecc4a1db2f94f26e8dfe))
+- Updated the hassette client to 0.57.0. (#11)
 
-## 0.1.0 (2026-10-09)
-
+## [0.1.0](https://github.com/NodeJSmith/hass-hassette/releases/tag/v0.1.0) (2026-10-09)
 
 ### Features
 
-* add the Hassette integration for Home Assistant ([#2](https://github.com/NodeJSmith/hass-hassette/issues/2)) ([ff716b4](https://github.com/NodeJSmith/hass-hassette/commit/ff716b453c73f69b03094b21de17460f12f54574))
+- **First release.** Connect Home Assistant to a hassette server and each hassette app appears as a device, with sensor, switch, and button entities kept current by a single polling request per interval. Server errors show as actionable Home Assistant messages instead of raw tracebacks. Installable through HACS. (#2)
