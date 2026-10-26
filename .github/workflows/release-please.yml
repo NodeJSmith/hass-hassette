@@ -109,9 +109,9 @@ jobs:
                   set -euo pipefail
                   version="${TAG_NAME#v}"
 
-                  # Everything between "## [<version>]" and the next "## [" heading.
+                  # Everything between "## [<version>]" and the next "## " heading (0.1.0's has no brackets).
                   notes=$(awk -v ver="$version" '
-                    /^## \[/ {
+                    /^## / {
                       if (found) exit
                       if (index($0, "## [" ver "]")) found=1
                       next
