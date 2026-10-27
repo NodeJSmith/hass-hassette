@@ -1,5 +1,5 @@
 [tools]
-java = "temurin-21"
+java = "temurin-21.0.13+9.0.LTS"
 prek = "0.5.7"
 python = ["3.14.8"]
 uv = "latest"
