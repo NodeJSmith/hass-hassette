@@ -60,6 +60,7 @@ ACTION_ERRORS: list[tuple[Exception, type[HomeAssistantError], str]] = [
     (http_error(InvalidAppKeyError, 400, code="invalid_app_key"), ServiceValidationError, "not_found"),
     (http_error(AppBlockedError, 409, code="app_blocked"), ServiceValidationError, "blocked_by_filter"),
     (http_error(ConflictError, 409, code="action_in_progress"), HomeAssistantError, "action_in_progress"),
+    (http_error(ConflictError, 409, code="needs_restart"), HomeAssistantError, "needs_restart"),
     (http_error(ConflictError, 409), HomeAssistantError, "unknown"),
     (http_error(BootstrapNotReleasedError, 409, code="bootstrap_not_released"), HomeAssistantError, "not_bootstrapped"),
     (
@@ -209,6 +210,19 @@ async def test_failed_action_shows_truncated_detail(
 
     assert caught.value.translation_key == "action_failed"
     assert len(caught.value.translation_placeholders["detail"]) == MAX_DETAIL_LENGTH
+
+
+async def test_needs_restart_action_shows_detail(
+    hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry
+) -> None:
+    detail = "refused 1 of 1 instances of app 'motion_lights'; 'motion_lights' needs a hassette restart"
+    client.action_client.action.side_effect = http_error(ConflictError, 409, code="needs_restart", detail=detail)
+
+    with pytest.raises(HomeAssistantError) as caught:
+        await hass.services.async_call(SWITCH_DOMAIN, SERVICE_TURN_ON, {ATTR_ENTITY_ID: SWITCH}, blocking=True)
+
+    assert caught.value.translation_key == "needs_restart"
+    assert caught.value.translation_placeholders == {"detail": detail}
 
 
 async def test_redirect_on_action_names_target(

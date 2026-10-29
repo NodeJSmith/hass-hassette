@@ -41,6 +41,10 @@ _LOGGER = logging.getLogger(__name__)
 # hassette-client gains a class for it, it arrives as a plain ConflictError; switch to that class then.
 ACTION_IN_PROGRESS_CODE = "action_in_progress"
 
+# The 409 code hassette 0.61+ sends when an app instance needs a hassette restart before it can be acted
+# on. hassette-client 0.60 doesn't know the code, so it arrives as a ConflictError with an UnknownValue code.
+NEEDS_RESTART_CODE = "needs_restart"
+
 # Failures a single stalled poll can cause; the coordinator tolerates them within TOLERANCE_WINDOW of a good poll.
 TRANSIENT_POLL_ERRORS: tuple[type[HassetteClientError], ...] = (
     HassetteConnectionError,
@@ -83,7 +87,8 @@ POLL_ERRORS: tuple[ErrorRow, ...] = (
     (ResponseValidationError, "invalid_response"),
 )
 
-# Entity action errors. action_in_progress is a branch, since it's a ConflictError told apart by its code.
+# Entity action errors. action_in_progress and needs_restart are branches, since they're ConflictErrors told
+# apart by their code.
 ACTION_ERRORS: tuple[ErrorRow, ...] = (
     (RedirectError, "redirected"),
     (AuthenticationError, "invalid_auth"),
@@ -138,7 +143,7 @@ def placeholders_for(exc: HassetteClientError) -> dict[str, str] | None:
     """Return the translation placeholders an error's message needs, if any (``{location}``, ``{detail}``)."""
     if isinstance(exc, RedirectError):
         return {"location": redirect_target(exc)}
-    if isinstance(exc, ActionFailedError):
+    if isinstance(exc, ActionFailedError) or (isinstance(exc, ConflictError) and exc.code == NEEDS_RESTART_CODE):
         return {"detail": truncate_detail(exc.detail or "")}
     return None
 
@@ -174,6 +179,8 @@ def action_error(exc: HassetteClientError) -> HomeAssistantError:
         return ServiceValidationError(translation_domain=DOMAIN, translation_key=key)
     if isinstance(exc, ConflictError) and exc.code == ACTION_IN_PROGRESS_CODE:
         key = "action_in_progress"
+    elif isinstance(exc, ConflictError) and exc.code == NEEDS_RESTART_CODE:
+        key = "needs_restart"
     elif (key := lookup(ACTION_ERRORS, exc)) is None:
         _LOGGER.error("Unexpected error from a hassette app action", exc_info=exc)
         key = "unknown"
