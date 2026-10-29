@@ -17,7 +17,7 @@ def keys(rows: tuple[errors.ErrorRow, ...]) -> set[str]:
 
 def test_exception_keys_exist() -> None:
     used = keys(errors.POLL_ERRORS) | keys(errors.ACTION_ERRORS) | keys(errors.ACTION_VALIDATION_ERRORS)
-    used |= {"invalid_auth", "action_in_progress", "unknown", "unsupported_version", "addon_refreshed"}
+    used |= {"invalid_auth", "action_in_progress", "needs_restart", "unknown", "unsupported_version", "addon_refreshed"}
     assert used <= set(STRINGS["exceptions"])
 
 

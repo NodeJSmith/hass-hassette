@@ -95,6 +95,9 @@
     "action_in_progress": {
       "message": "Another action on this app is still running. Try again when it finishes."
     },
+    "needs_restart": {
+      "message": "Restart hassette before acting on this app: {detail}"
+    },
     "action_timeout": {
       "message": "hassette didn't confirm the action in time. It may still have run; the app's state updates on the next refresh."
     },
