@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/NodeJSmith/hass-hassette/compare/v0.4.0...v0.4.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* tell users to restart hassette when an app action needs it ([#30](https://github.com/NodeJSmith/hass-hassette/issues/30)) ([3f15480](https://github.com/NodeJSmith/hass-hassette/commit/3f15480d402a1c58c78ae69dcd9e38fff26acd87))
+
 ## [0.4.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.3.0...v0.4.0) (2026-10-26)
 
 ### Breaking Changes
