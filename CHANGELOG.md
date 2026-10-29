@@ -5,7 +5,7 @@
 
 ### Bug Fixes
 
-* tell users to restart hassette when an app action needs it ([#30](https://github.com/NodeJSmith/hass-hassette/issues/30)) ([3f15480](https://github.com/NodeJSmith/hass-hassette/commit/3f15480d402a1c58c78ae69dcd9e38fff26acd87))
+- **A refused app action now says to restart hassette.** hassette 0.61 refuses to start or reload an app instance that needs a hassette restart (a timed-out hook may have left its old work running). Turning such an app's switch on or pressing its reload button showed a generic unknown error and logged "Unexpected error from a hassette app action". It now shows "Restart hassette before acting on this app", naming the refused instance. Still works with hassette 0.60. (#30)
 
 ## [0.4.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.3.0...v0.4.0) (2026-10-26)
 
