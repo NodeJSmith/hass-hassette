@@ -17,7 +17,7 @@ hassette's web UI. Each app device's **Visit** link opens that app's page in has
 
 - Home Assistant 2026.9.0 or newer
 - [HACS](https://hacs.xyz)
-- A hassette server that Home Assistant can reach over HTTP. hassette 0.60 or newer: an older hassette
+- A hassette server that Home Assistant can reach over HTTP. hassette 0.61 or newer: an older hassette
   serves an API this integration can't use, and Home Assistant raises a repair telling you to upgrade.
 
 ## Install

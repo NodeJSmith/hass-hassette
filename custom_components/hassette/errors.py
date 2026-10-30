@@ -11,17 +11,18 @@ import logging
 
 from hassette_client import (
     ActionFailedError,
+    ActionInProgressError,
     AppBlockedError,
     AppNotFoundError,
     AuthenticationError,
     BootstrapNotReleasedError,
-    ConflictError,
     ForbiddenError,
     GatewayError,
     HassetteClientError,
     HassetteConnectionError,
     HassetteTimeoutError,
     InvalidAppKeyError,
+    NeedsRestartError,
     RedirectError,
     ResponseValidationError,
     ServiceUnavailableError,
@@ -36,14 +37,6 @@ from yarl import URL
 from .const import DOMAIN, MAX_DETAIL_LENGTH
 
 _LOGGER = logging.getLogger(__name__)
-
-# The 409 code hassette sends while another action on the same app is running (hassette#2610). Until
-# hassette-client gains a class for it, it arrives as a plain ConflictError; switch to that class then.
-ACTION_IN_PROGRESS_CODE = "action_in_progress"
-
-# The 409 code hassette 0.61+ sends when an app instance needs a hassette restart before it can be acted
-# on. hassette-client 0.60 doesn't know the code, so it arrives as a ConflictError with an UnknownValue code.
-NEEDS_RESTART_CODE = "needs_restart"
 
 # Failures a single stalled poll can cause; the coordinator tolerates them within TOLERANCE_WINDOW of a good poll.
 TRANSIENT_POLL_ERRORS: tuple[type[HassetteClientError], ...] = (
@@ -87,12 +80,13 @@ POLL_ERRORS: tuple[ErrorRow, ...] = (
     (ResponseValidationError, "invalid_response"),
 )
 
-# Entity action errors. action_in_progress and needs_restart are branches, since they're ConflictErrors told
-# apart by their code.
+# Entity action errors.
 ACTION_ERRORS: tuple[ErrorRow, ...] = (
     (RedirectError, "redirected"),
     (AuthenticationError, "invalid_auth"),
     (BootstrapNotReleasedError, "not_bootstrapped"),
+    (ActionInProgressError, "action_in_progress"),
+    (NeedsRestartError, "needs_restart"),
     (ActionFailedError, "action_failed"),
     # A proxy's 502/503/504 or a timeout: the action may still have run.
     (GatewayError, "action_timeout"),
@@ -143,7 +137,7 @@ def placeholders_for(exc: HassetteClientError) -> dict[str, str] | None:
     """Return the translation placeholders an error's message needs, if any (``{location}``, ``{detail}``)."""
     if isinstance(exc, RedirectError):
         return {"location": redirect_target(exc)}
-    if isinstance(exc, ActionFailedError) or (isinstance(exc, ConflictError) and exc.code == NEEDS_RESTART_CODE):
+    if isinstance(exc, ActionFailedError | NeedsRestartError):
         return {"detail": truncate_detail(exc.detail or "")}
     return None
 
@@ -177,11 +171,7 @@ def action_error(exc: HassetteClientError) -> HomeAssistantError:
     """Map a failed app action to the error the entity action should raise."""
     if (key := lookup(ACTION_VALIDATION_ERRORS, exc)) is not None:
         return ServiceValidationError(translation_domain=DOMAIN, translation_key=key)
-    if isinstance(exc, ConflictError) and exc.code == ACTION_IN_PROGRESS_CODE:
-        key = "action_in_progress"
-    elif isinstance(exc, ConflictError) and exc.code == NEEDS_RESTART_CODE:
-        key = "needs_restart"
-    elif (key := lookup(ACTION_ERRORS, exc)) is None:
+    if (key := lookup(ACTION_ERRORS, exc)) is None:
         _LOGGER.error("Unexpected error from a hassette app action", exc_info=exc)
         key = "unknown"
     return HomeAssistantError(

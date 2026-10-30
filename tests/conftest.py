@@ -42,8 +42,8 @@ def make_health(**overrides: Any) -> SystemStatusResponse:
         "uptime_seconds": 100.0,
         "entity_count": 10,
         "app_count": 2,
-        "version": "0.60.0",
-        "api_schema_version": 3,
+        "version": "0.61.0",
+        "api_schema_version": 4,
     }
     return SystemStatusResponse.model_validate(data | overrides, context=LENIENT_CONTEXT)
 
@@ -106,7 +106,9 @@ def client() -> Generator[MagicMock]:
     action_instance.get_health = AsyncMock(side_effect=AssertionError("polls go through the polling client"))
     action_instance.get_apps = AsyncMock(side_effect=AssertionError("polls go through the polling client"))
     action_instance.action = AsyncMock(
-        side_effect=lambda app_key, action: ActionResponse(app_key=app_key, action=action, instance_index=None)
+        side_effect=lambda app_key, action: ActionResponse(
+            app_key=app_key, action=action, instance_index=None, outcomes=[]
+        )
     )
 
     def build(*_args: Any, request_timeout: float | None = None, **_kwargs: Any) -> MagicMock:
