@@ -10,6 +10,16 @@ hooks = [
     { id = "check-case-conflict" },
     { id = "check-json" },
     { id = "check-yaml" },
+    { id = "check-shebang-scripts-are-executable" },
+]
+
+# Hooks prek has no builtin for.
+[[repos]]
+repo = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "v6.0.0"
+hooks = [
+    { id = "check-builtin-literals" },
+    { id = "debug-statements" },
 ]
 
 [[repos]]

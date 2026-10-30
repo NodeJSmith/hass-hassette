@@ -164,3 +164,20 @@ jobs:
               run: |
                   jq -r '.requirements[]' custom_components/hassette/manifest.json > requirements.txt
                   uvx pip-audit@2.10.0 -r requirements.txt
+
+    # The required check for this workflow. A skipped job passes: file-sizes only runs on PRs.
+    lint-complete:
+        needs: [secrets, lint, file-sizes, duplicate-code, security]
+        if: always()
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - name: Report result
+              run: |
+                  failed="${{ contains(needs.*.result, 'failure') }}"
+                  cancelled="${{ contains(needs.*.result, 'cancelled') }}"
+                  if [[ "$failed" == "true" || "$cancelled" == "true" ]]; then
+                      echo "One or more lint jobs failed or were cancelled"
+                      exit 1
+                  fi
+                  echo "All lint checks passed or were skipped"
