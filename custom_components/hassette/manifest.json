@@ -16,7 +16,7 @@
     "hassette_client"
   ],
   "requirements": [
-    "hassette-client==0.60.0"
+    "hassette-client==0.61.0"
   ],
   "single_config_entry": true,
   "version": "0.4.1"
