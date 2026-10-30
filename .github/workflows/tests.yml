@@ -68,3 +68,20 @@ jobs:
                   fi
 
             - run: uv run --no-sync pytest
+
+    # The required check for this workflow.
+    tests-complete:
+        needs: [latest, floor]
+        if: always()
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - name: Report result
+              run: |
+                  failed="${{ contains(needs.*.result, 'failure') }}"
+                  cancelled="${{ contains(needs.*.result, 'cancelled') }}"
+                  if [[ "$failed" == "true" || "$cancelled" == "true" ]]; then
+                      echo "One or more test jobs failed or were cancelled"
+                      exit 1
+                  fi
+                  echo "All tests passed"
