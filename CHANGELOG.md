@@ -2,16 +2,9 @@
 
 ## [0.5.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.4.1...v0.5.0) (2026-11-03)
 
+### Breaking Changes
 
-### ⚠ BREAKING CHANGES
-
-* hass-hassette now requires hassette 0.62 or newer. Upgrade hassette first (the add-on updates on its own), then update the integration; against an older hassette, Home Assistant raises a repair asking you to upgrade.
-* require hassette 0.61 for hassette-client 0.61 ([#33](https://github.com/NodeJSmith/hass-hassette/issues/33))
-
-### Features
-
-* require hassette 0.61 for hassette-client 0.61 ([#33](https://github.com/NodeJSmith/hass-hassette/issues/33)) ([b5c323e](https://github.com/NodeJSmith/hass-hassette/commit/b5c323e7ce25cb0a963f2c469fa714ecc4cfd0f9))
-* require hassette 0.62 for hassette-client 0.62 ([#39](https://github.com/NodeJSmith/hass-hassette/issues/39)) ([96a7c43](https://github.com/NodeJSmith/hass-hassette/commit/96a7c433e6e95cf60854145e0da17b7275eca38f))
+- **Requires hassette 0.62 or newer.** hassette 0.62 addresses app instances by name, and earlier integration releases can't read its responses, so their entities stay unavailable against it. The integration now uses hassette-client 0.62.0, which needs the API schema first served by hassette 0.62.0. Upgrade your hassette server first (the add-on updates on its own), then update the integration. With an older server, Home Assistant raises a repair asking you to upgrade it. (#33, #39)
 
 ## [0.4.1](https://github.com/NodeJSmith/hass-hassette/compare/v0.4.0...v0.4.1) (2026-10-29)
 
