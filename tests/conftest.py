@@ -42,8 +42,8 @@ def make_health(**overrides: Any) -> SystemStatusResponse:
         "uptime_seconds": 100.0,
         "entity_count": 10,
         "app_count": 2,
-        "version": "0.61.0",
-        "api_schema_version": 4,
+        "version": "0.62.0",
+        "api_schema_version": 5,
     }
     return SystemStatusResponse.model_validate(data | overrides, context=LENIENT_CONTEXT)
 
@@ -56,7 +56,6 @@ def make_app(app_key: str = "motion_lights", status: str = "running", **override
         "display_name": app_key.replace("_", " ").title(),
         "filename": f"{app_key}.py",
         "enabled": True,
-        "auto_loaded": False,
         "status": status,
     }
     return AppSummary.model_validate(data | overrides, context=LENIENT_CONTEXT)
@@ -107,7 +106,7 @@ def client() -> Generator[MagicMock]:
     action_instance.get_apps = AsyncMock(side_effect=AssertionError("polls go through the polling client"))
     action_instance.action = AsyncMock(
         side_effect=lambda app_key, action: ActionResponse(
-            app_key=app_key, action=action, instance_index=None, outcomes=[]
+            app_key=app_key, action=action, instance_name=None, outcomes=[]
         )
     )
 
