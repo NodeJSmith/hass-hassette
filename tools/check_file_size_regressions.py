@@ -13,8 +13,8 @@ Usage:
 
 <base-ref>/<head-ref> are the PR's own base and head refs; the merge-base between them is the
 comparison point (see git_merge_base's docstring in lint_helpers.py). Both refs must already be
-fetched. The `check-file-size-regressions` pre-push hook in prek.toml runs it locally as
-`origin/main HEAD`.
+fetched. CI, the `check-file-size-regressions` pre-push hook and autofix all run it through the
+`gates:file-sizes` mise task (mise.toml), which defaults to `origin/HEAD HEAD`.
 """
 
 import json
