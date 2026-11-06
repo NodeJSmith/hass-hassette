@@ -1,7 +1,8 @@
 # The autofix pipeline's recipe for this repo, read from the default branch at the start of each
 # run (Dotfiles packages/autofix/src/autofix/recipe.py). A PR can't change what its own review
-# session runs: edits here take effect once they merge.
-schema_version = 1
+# session runs: edits here take effect once they merge. An automated PR that edits this file is
+# parked for a human to merge or close; it is never auto-merged.
+schema_version = 2
 
 [review]
 # Workflow `name:` values whose failures get CI triage (rerun or park) instead of a review session.
@@ -12,12 +13,31 @@ checks = """
 
 **Before committing.** Run `uv run pytest`, `prek -a` and `prek run pyright -a --stage pre-push`.
 
-**After committing.** Run the two merge-blocking gates the way CI's new-code steps do (`.github/workflows/lint.yml`). The `check-file-size-regressions` and `check-duplicate-code` pre-push hooks run the same commands, but run them here anyway so the result doesn't depend on hooks being installed; a fix can trip them on its own. Both compare commits, so run them after committing. `check_duplicate_code.py` needs Java, because it runs PMD CPD.
+**After committing.** Run `mise run gates`: the two merge-blocking new-code gates, the same mise tasks CI's `file-sizes` and `duplicate-code` jobs and the pre-push hooks run. Run them here anyway so the result doesn't depend on hooks being installed; a fix can trip them on its own. Both compare commits, so run them after committing.
 
-```bash
-uv run python tools/check_file_size_regressions.py origin/main HEAD
-uv run python tools/check_duplicate_code.py --gate-new-code origin/main HEAD
-```
+If either fails, fix it, amend, and repeat the before-committing checks and `mise run gates` on the amended commit before pushing. Moving code to fix a file-size failure can break imports or types or add duplication, and a duplication fix can grow a file, so earlier results don't cover the amended `HEAD`.
+"""
 
-If either fails, fix it, amend, and repeat the before-committing checks and these gates on the amended commit before pushing. Moving code to fix a file-size failure can break imports or types or add duplication, and a duplication fix can grow a file, so earlier results don't cover the amended `HEAD`.
+[fix]
+# Inserted into the fix prompt as its "Repo checks" section.
+checks = """
+**Public surface.** Besides documented behavior, this integration's public surface is what Home Assistant users depend on: entity unique IDs (changing one orphans the user's entity and its history), the config and options flow (its steps, fields and stored data), and any services it registers (names and fields).
+
+**Tests, lint and types.** Run the full suite with `uv run pytest`. A run scoped to some test files needs `--no-cov`: `pyproject.toml`'s `--cov-fail-under=95` only holds for the full suite. Run `prek -a` for lint, and `prek run pyright -a --stage pre-push` for type checks.
+
+**New-code gates.** `mise run gates` runs both, the same tasks CI runs on every PR:
+- `gates:file-sizes` fails if your change grows a file past 800 lines, or grows one that's already over. Fix by splitting the file or moving code out, not by adding a suppression pragma.
+- `gates:duplicates` fails if your change adds a 3rd+ copy of a code block. Fix by extracting the shared block into a helper or fixture, not by adding ignore markers.
+"""
+# Inserted into the ship prompt as its "Repo checks" section.
+ship_checks = """
+**Why CI covers the rest.** `.github/workflows/tests.yml` runs the complete test suite on every PR, so a scoped run is enough here.
+
+**Scoped tests.** `uv run pytest --no-cov <test file(s)>`. Without `--no-cov` a scoped run always fails `pyproject.toml`'s `--cov-fail-under=95`, which only holds for the full suite.
+
+**Lint and type checks.** `prek -a`, then `prek run pyright -a --stage pre-push`.
+
+**New-code gates.** `mise run gates`.
+
+**Repairs the repair pass may make**, besides a formatter or a lint rule's `--fix`: none.
 """

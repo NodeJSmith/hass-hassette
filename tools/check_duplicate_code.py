@@ -49,7 +49,8 @@ distribution (~50MB) to a shared cache (`$XDG_CACHE_HOME/hass-hassette-dev-tools
 
 Wired into CI (`.github/workflows/lint.yml`) as a `--gate-new-code` step that fails only when the
 current PR's own diff introduces a new violation, and into the `check-duplicate-code` pre-push
-hook in prek.toml, which runs the same check against `origin/main HEAD`.
+hook in prek.toml. Both, and autofix, run it through the `gates:duplicates` mise task (mise.toml),
+which defaults to `origin/HEAD HEAD`.
 """
 
 import ast

@@ -85,13 +85,13 @@ entry = "env -u GH_TOKEN -u GITHUB_TOKEN uvx zizmor@1.26.1 --offline"
 files = '^\.github/workflows/'
 stages = ["pre-commit", "pre-push"]
 
-# These two compare against origin/main, so they run at pre-push only; lint.yml runs them in their own
-# jobs against the PR's exact base/head SHAs.
+# These two compare against origin/HEAD, so they run at pre-push only. They run the same mise tasks
+# (mise.toml) that lint.yml's own jobs run against the PR's exact base/head SHAs.
 [[repos.hooks]]
 id = "check-file-size-regressions"
 name = "Check for new file-size regressions"
 language = "system"
-entry = "uv run python tools/check_file_size_regressions.py origin/main HEAD"
+entry = "mise run gates:file-sizes"
 pass_filenames = false
 require_serial = true
 types = ["python"]
@@ -99,9 +99,9 @@ stages = ["pre-push"]
 
 [[repos.hooks]]
 id = "check-duplicate-code"
-name = "Check for new 3+-way duplicate code (PMD CPD, needs Java 21)"
+name = "Check for new 3+-way duplicate code (PMD CPD)"
 language = "system"
-entry = "uv run python tools/check_duplicate_code.py --gate-new-code origin/main HEAD"
+entry = "mise run gates:duplicates"
 pass_filenames = false
 require_serial = true
 types = ["python"]
