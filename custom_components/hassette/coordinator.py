@@ -165,7 +165,7 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         return False
 
     def update_app_devices(self, apps: list[AppSummary], hub_id: str) -> None:
-        """Keep each existing app device's name, model and hub link in step with hassette and the hub device.
+        """Keep each existing app device's name, model, model ID and hub link in step with hassette and the hub device.
 
         Devices are created by the platforms with their first entity; a user's own rename is kept,
         since it is stored separately as ``name_by_user``. The hub link is restored after the hub
@@ -175,10 +175,11 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         for app in apps:
             device = devices.async_get_device_by_identifier((DOMAIN, app.app_key), self.config_entry.entry_id)
             # The same fields HassetteAppEntity's DeviceInfo creates the device with.
-            wanted = (app.display_name, app.class_name, hub_id)
-            if device is not None and (device.name, device.model, device.via_device_id) != wanted:
+            model, model_id = app_device_model(app)
+            wanted = (app.display_name, model, model_id, hub_id)
+            if device is not None and (device.name, device.model, device.model_id, device.via_device_id) != wanted:
                 devices.async_update_device(
-                    device.id, name=app.display_name, model=app.class_name, via_device_id=hub_id
+                    device.id, name=app.display_name, model=model, model_id=model_id, via_device_id=hub_id
                 )
 
     def within_tolerance(self) -> bool:
@@ -243,3 +244,14 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
             )
             .id
         )
+
+
+def app_device_model(app: AppSummary) -> tuple[str, str | None]:
+    """The ``(model, model_id)`` an app's device shows.
+
+    With a description, the device reads ``<description> (<ClassName>)``; without one, the class name
+    alone, so the card never shows the class name twice.
+    """
+    if app.description:
+        return app.description, app.class_name
+    return app.class_name, None

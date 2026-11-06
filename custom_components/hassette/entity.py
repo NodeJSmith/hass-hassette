@@ -14,7 +14,7 @@ from homeassistant.helpers.entity import Entity, EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, MANUFACTURER, SERVER_DEVICE_ID
-from .coordinator import HassetteConfigEntry, HassetteCoordinator
+from .coordinator import HassetteConfigEntry, HassetteCoordinator, app_device_model
 from .errors import action_error, is_completed_action
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,11 +37,13 @@ class HassetteAppEntity(CoordinatorEntity[HassetteCoordinator]):
         self.entity_description = description
         self.app_key = app.app_key
         self._attr_unique_id = app_unique_id(app.app_key, description)
+        model, model_id = app_device_model(app)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, app.app_key)},
-            # The coordinator keeps name and model in step with hassette (update_app_devices).
+            # The coordinator keeps name, model and model ID in step with hassette (update_app_devices).
             name=app.display_name,
-            model=app.class_name,
+            model=model,
+            model_id=model_id,
             manufacturer=MANUFACTURER,
             # Every successful poll registers the hub device, and entities are only built after one.
             via_device_id=dr.async_get_device_id_by_identifier(
