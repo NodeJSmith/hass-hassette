@@ -58,6 +58,38 @@ async def test_app_rename_updates_its_device(
     assert hass.states.get(SWITCH) is not None
 
 
+async def test_app_description_shows_as_the_device_model(
+    hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    devices = dr.async_get(hass)
+
+    def model() -> tuple[str | None, str | None]:
+        device = devices.async_get_device_by_identifier((DOMAIN, "motion_lights"), ENTRY_ID)
+        assert device is not None
+        return device.model, device.model_id
+
+    assert model() == ("MotionLights", None)
+    for description in ("Turns on the hall lights", "Turns on the porch lights"):
+        client.get_apps.return_value = make_apps(make_app(description=description))
+        await poll(hass, freezer)
+        assert model() == (description, "MotionLights")
+
+    client.get_apps.return_value = make_apps(make_app())
+    await poll(hass, freezer)
+    assert model() == ("MotionLights", None)
+
+
+async def test_new_app_with_a_description_gets_it_as_its_model(
+    hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    client.get_apps.return_value = make_apps(make_app(), make_app("garage_door", description="Opens the garage"))
+    await poll(hass, freezer)
+
+    garage = dr.async_get(hass).async_get_device_by_identifier((DOMAIN, "garage_door"), ENTRY_ID)
+    assert garage is not None
+    assert (garage.model, garage.model_id) == ("Opens the garage", "MotionLights")
+
+
 async def test_app_with_key_outside_the_alphabet_is_ignored(
     hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
 ) -> None:
