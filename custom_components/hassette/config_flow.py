@@ -21,8 +21,8 @@ from homeassistant.helpers.selector import BooleanSelector, TextSelector, TextSe
 from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 from yarl import URL
 
-from .addon import announced_connection
-from .const import ADDON_SLUG_SUFFIX, CONF_ADDON_SLUG, DOMAIN
+from .addon import announced_connection, normalize_token
+from .const import ADDON_SLUG_SUFFIX, CONF_ADDON_SLUG, DEFAULT_VERIFY_SSL, DOMAIN
 from .errors import FORM_ERRORS, lookup, redirect_target, version_placeholders
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ CONNECTION_SCHEMA = probatio.Schema(
     {
         probatio.Required(CONF_URL): URL_SELECTOR,
         probatio.Optional(probatio.Secret(CONF_API_TOKEN)): TOKEN_SELECTOR,
-        probatio.Optional(CONF_VERIFY_SSL, default=True): BooleanSelector(),
+        probatio.Optional(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): BooleanSelector(),
     }
 )
 REAUTH_SCHEMA = probatio.Schema({probatio.Optional(probatio.Secret(CONF_API_TOKEN)): TOKEN_SELECTOR})
@@ -56,11 +56,6 @@ def normalize_url(raw: str) -> str:
     if parsed.user is not None or parsed.password is not None:
         raise InvalidUrlError
     return raw.removesuffix("/")
-
-
-def normalize_token(raw: str | None) -> str | None:
-    """Store a blank token as absent: hassette-client sends any string, empty included, as a bearer token."""
-    return raw or None
 
 
 class HassetteConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -105,7 +100,7 @@ class HassetteConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="invalid_discovery_info")
         errors: dict[str, str] = {}
         if user_input is not None:
-            data = await self.validate({**self.announced, CONF_VERIFY_SSL: True}, errors)
+            data = await self.validate({**self.announced, CONF_VERIFY_SSL: DEFAULT_VERIFY_SSL}, errors)
             if data is not None:
                 return self.async_create_entry(title=self.addon.name, data={**data, CONF_ADDON_SLUG: self.addon.slug})
         self._set_confirm_only()
@@ -160,7 +155,7 @@ class HassetteConfigFlow(ConfigFlow, domain=DOMAIN):
         """
         self.placeholders = {}
         token = normalize_token(user_input.get(CONF_API_TOKEN))
-        verify_ssl: bool = user_input.get(CONF_VERIFY_SSL, True)
+        verify_ssl: bool = user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
         try:
             url = normalize_url(user_input[CONF_URL])
         except InvalidUrlError:
