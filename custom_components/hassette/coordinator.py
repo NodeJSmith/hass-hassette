@@ -65,7 +65,7 @@ class AppDeviceFields(TypedDict):
 
 
 class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
-    """Read ``/api/health`` then ``/api/apps`` every 30 seconds.
+    """Read ``/api/health`` then ``/api/apps`` every ``SCAN_INTERVAL``.
 
     Health is in-memory on the server and says whether apps can run yet (``bootstrap_released``) and
     which API schema the server speaks, so it is read first on every poll. A transient failure within
@@ -98,7 +98,7 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         # The last server version and bootstrap state seen, to act only when they change.
         self.server_version: str | None = None
         self.bootstrap_released: bool | None = None
-        # Log each newer server version and each unusable app_key once, not every 30 s.
+        # Log each newer server version and each unusable app_key once, not on every poll.
         self.warned_newer_versions: set[str] = set()
         self.skipped_app_keys: set[str] = set()
         # Unreadable responses logged since the last good poll, by (endpoint, error type): not by message,

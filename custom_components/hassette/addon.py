@@ -14,14 +14,19 @@ from .const import ADDON_NAME
 _LOGGER = logging.getLogger(__name__)
 
 
+def normalize_token(raw: str | None) -> str | None:
+    """Store a blank token as absent: hassette-client sends any string, empty included, as a bearer token."""
+    return raw or None
+
+
 def announced_connection(config: Mapping[str, Any]) -> dict[str, Any] | None:
     """Map an add-on discovery payload (``host``, ``port``, ``auth_token``) to entry data, or ``None`` if unusable."""
     host = config.get("host")
     port = config.get("port")
     if not host or not port:
         return None
-    # An add-on that serves without a token announces an empty one; the entry stores that as absent.
-    return {CONF_URL: f"http://{host}:{port}", CONF_API_TOKEN: config.get("auth_token") or None}
+    # An add-on that serves without a token announces an empty one.
+    return {CONF_URL: f"http://{host}:{port}", CONF_API_TOKEN: normalize_token(config.get("auth_token"))}
 
 
 async def async_read_announced_connection(hass: HomeAssistant, slug: str) -> dict[str, Any] | None:
