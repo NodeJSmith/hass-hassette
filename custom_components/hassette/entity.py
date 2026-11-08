@@ -112,7 +112,10 @@ def add_app_entities(
     def wanted(app: AppSummary) -> bool:
         registered = registry.async_get_entity_id(platform, DOMAIN, app_unique_id(app.app_key, description))
         if app.app_key in added:
+            # Added this session: its entity is live unless the user deleted it; re-add that only
+            # once hassette lists the app in config again.
             return registered is None and app.in_current_config
+        # Not added yet: restore a registry entry, or add an app hassette has in config.
         return registered is not None or app.in_current_config
 
     @callback
