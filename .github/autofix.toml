@@ -41,3 +41,17 @@ ship_checks = """
 
 **Repairs the repair pass may make**, besides a formatter or a lint rule's `--fix`: none.
 """
+
+# The scan job's unit pools and the profiles it rotates through, in this order (Dotfiles
+# packages/autofix/src/autofix/scan_profiles.py). A repo without [scan] can't run the scan job.
+[scan.units.code]
+kind = "module"
+root = "custom_components/hassette"
+
+[[scan.profile]]
+name = "clean-code"
+units = "code"
+
+[[scan.profile]]
+name = "review"
+units = "code"
