@@ -4,6 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from typing import TypedDict
 
 from hassette_client import (
     HassetteClient,
@@ -53,6 +54,14 @@ class HassetteData:
 
     health: SystemStatusResponse
     apps: dict[str, AppSummary]
+
+
+class AppDeviceFields(TypedDict):
+    """The app device fields hassette owns, keyed by their ``DeviceInfo`` and ``async_update_device`` names."""
+
+    name: str
+    model: str
+    model_id: str | None
 
 
 class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
@@ -174,13 +183,13 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         devices = dr.async_get(self.hass)
         for app in apps:
             device = devices.async_get_device_by_identifier((DOMAIN, app.app_key), self.config_entry.entry_id)
-            # The same fields HassetteAppEntity's DeviceInfo creates the device with.
-            model, model_id = app_device_model(app)
-            wanted = (app.display_name, model, model_id, hub_id)
-            if device is not None and (device.name, device.model, device.model_id, device.via_device_id) != wanted:
-                devices.async_update_device(
-                    device.id, name=app.display_name, model=model, model_id=model_id, via_device_id=hub_id
-                )
+            if device is None:
+                continue
+            fields = app_device_fields(app)
+            # DeviceEntry attributes share the field names, so a field added there is compared here too.
+            wanted = {**fields, "via_device_id": hub_id}
+            if any(getattr(device, key) != value for key, value in wanted.items()):
+                devices.async_update_device(device.id, **fields, via_device_id=hub_id)
 
     def within_tolerance(self) -> bool:
         """Whether a transient failure may keep the previous data: entities are up and the last good poll is recent."""
@@ -246,12 +255,17 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         )
 
 
-def app_device_model(app: AppSummary) -> tuple[str, str | None]:
-    """The ``(model, model_id)`` an app's device shows.
+def app_device_fields(app: AppSummary) -> AppDeviceFields:
+    """The ``name``, ``model`` and ``model_id`` an app's device shows.
+
+    The keys are the keyword names of both ``DeviceInfo`` and ``async_update_device``, so the entity
+    that creates the device and the coordinator that keeps it in step share one list of fields.
 
     With a description, the device reads ``<description> (<ClassName>)``; without one, the class name
     alone, so the card never shows the class name twice.
     """
     if app.description:
-        return app.description, app.class_name
-    return app.class_name, None
+        model, model_id = app.description, app.class_name
+    else:
+        model, model_id = app.class_name, None
+    return AppDeviceFields(name=app.display_name, model=model, model_id=model_id)
