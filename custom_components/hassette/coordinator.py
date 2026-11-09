@@ -206,11 +206,8 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
             device = devices.async_get_device_by_identifier((DOMAIN, app.app_key), self.config_entry.entry_id)
             if device is None:
                 continue
-            fields = app_device_fields(app)
-            # DeviceEntry attributes share the field names, so a field added there is compared here too.
-            wanted = {**fields, "via_device_id": hub_id}
-            if any(getattr(device, key) != value for key, value in wanted.items()):
-                devices.async_update_device(device.id, **fields, via_device_id=hub_id)
+            # The registry writes, and fires an update event, only when a value differs.
+            devices.async_update_device(device.id, **app_device_fields(app), via_device_id=hub_id)
 
     def within_tolerance(self) -> bool:
         """Whether a transient failure may keep the previous data: entities are up and the last good poll is recent."""
