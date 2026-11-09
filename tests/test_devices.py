@@ -58,6 +58,20 @@ async def test_app_rename_updates_its_device(
     assert hass.states.get(SWITCH) is not None
 
 
+async def test_unchanged_poll_leaves_the_app_device_untouched(
+    hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    devices = dr.async_get(hass)
+    before = devices.async_get_device_by_identifier((DOMAIN, "motion_lights"), ENTRY_ID)
+    assert before is not None
+
+    await poll(hass, freezer)
+
+    after = devices.async_get_device_by_identifier((DOMAIN, "motion_lights"), ENTRY_ID)
+    assert after is not None
+    assert after.modified_at == before.modified_at
+
+
 async def test_app_description_shows_as_the_device_model(
     hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
 ) -> None:
