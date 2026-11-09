@@ -37,7 +37,13 @@ from .const import (
     TOLERANCE_WINDOW,
     UPGRADE_DOCS_URL,
 )
-from .errors import ADDON_FOLLOW_ERRORS, TRANSIENT_POLL_ERRORS, poll_error, version_placeholders
+from .errors import (
+    ADDON_FOLLOW_ERRORS,
+    TRANSIENT_POLL_ERRORS,
+    is_mapped_poll_error,
+    poll_error,
+    version_placeholders,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -101,9 +107,9 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         # Log each newer server version and each unusable app_key once, not on every poll.
         self.warned_newer_versions: set[str] = set()
         self.skipped_app_keys: set[str] = set()
-        # Unreadable responses logged since the last good poll, by (endpoint, error type): not by message,
-        # which can embed the body size and so change on every poll.
-        self.logged_validation_errors: set[tuple[str | None, str]] = set()
+        # Unreadable responses and unexpected errors logged since the last good poll, by (endpoint, error
+        # type): not by message, which can embed the body size and so change on every poll.
+        self.logged_poll_errors: set[tuple[str | None, str]] = set()
 
     async def _async_update_data(self) -> HassetteData:
         try:
@@ -128,15 +134,11 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
             raise poll_error(exc) from exc
         except HassetteClientError as exc:
             await self.follow_addon(exc)
-            if isinstance(exc, ResponseValidationError):
-                key = (exc.endpoint, type(exc).__name__)
-                if key not in self.logged_validation_errors:
-                    self.logged_validation_errors.add(key)
-                    _LOGGER.warning("hassette sent a response this integration can't read: %s", exc)
+            self.log_poll_error_once(exc)
             raise poll_error(exc) from exc
 
         self.last_success = dt_util.utcnow()
-        self.logged_validation_errors.clear()
+        self.logged_poll_errors.clear()
         # Every poll, so app entities always find the hub to link under; unchanged fields write nothing.
         hub_id = self.register_server_device(health.version)
         self.track_version(health)
@@ -144,6 +146,25 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         usable = [app for app in apps.apps if self.usable_app_key(app.app_key)]
         self.update_app_devices(usable, hub_id)
         return HassetteData(health=health, apps={app.app_key: app for app in usable})
+
+    def log_poll_error_once(self, exc: HassetteClientError) -> None:
+        """Warn about an unreadable response or an unexpected error once per endpoint and type until a good poll.
+
+        Home Assistant logs only the translated message, so an error without its own message would
+        otherwise leave no cause in the log.
+        """
+        unreadable = isinstance(exc, ResponseValidationError)
+        if not unreadable and is_mapped_poll_error(exc):
+            return
+        # The base HassetteClientError carries no endpoint.
+        key = (getattr(exc, "endpoint", None), type(exc).__name__)
+        if key in self.logged_poll_errors:
+            return
+        self.logged_poll_errors.add(key)
+        if unreadable:
+            _LOGGER.warning("hassette sent a response this integration can't read: %s", exc)
+        else:
+            _LOGGER.warning("Unexpected error polling hassette: %s", exc, exc_info=exc)
 
     async def follow_addon(self, exc: HassetteClientError) -> None:
         """After a rejected token or an unreachable server, repoint a discovered entry at what its add-on announces.

@@ -160,14 +160,16 @@ def lookup(rows: tuple[ErrorRow, ...], exc: HassetteClientError) -> str | None:
     return next((key for cls, key in rows if isinstance(exc, cls)), None)
 
 
+def is_mapped_poll_error(exc: HassetteClientError) -> bool:
+    """Whether a failed poll has its own message; any other error is reported as ``unknown``."""
+    return isinstance(exc, AuthenticationError) or lookup(POLL_ERRORS, exc) is not None
+
+
 def poll_error(exc: HassetteClientError) -> HomeAssistantError:
     """Map a failed coordinator poll to the error the coordinator should raise."""
     if isinstance(exc, AuthenticationError):
         return ConfigEntryAuthFailed(translation_domain=DOMAIN, translation_key="invalid_auth")
-    key = lookup(POLL_ERRORS, exc)
-    if key is None:
-        _LOGGER.debug("Unexpected error polling hassette", exc_info=exc)
-        key = "unknown"
+    key = lookup(POLL_ERRORS, exc) or "unknown"
     return UpdateFailed(translation_domain=DOMAIN, translation_key=key, translation_placeholders=placeholders_for(exc))
 
 

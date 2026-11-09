@@ -1,5 +1,6 @@
 """Tests for polling hassette: transient-failure tolerance, version and bootstrap changes, unreadable responses."""
 
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -8,6 +9,7 @@ from hassette_client import (
     AuthenticationError,
     ForbiddenError,
     GatewayError,
+    HassetteClientError,
     HassetteConnectionError,
     HassetteTimeoutError,
     RedirectError,
@@ -159,9 +161,40 @@ async def test_unreadable_responses_are_logged_once_per_outage(
             body_excerpt="<html>",
         )
         await poll(hass, freezer)
-    assert coordinator.logged_validation_errors == {("GET /api/apps", "UnexpectedResponseError")}
+    assert coordinator.logged_poll_errors == {("GET /api/apps", "UnexpectedResponseError")}
     assert coordinator.last_exception.translation_key == "poll_unexpected_response"
 
     client.get_apps.side_effect = None
     await poll(hass, freezer)
-    assert coordinator.logged_validation_errors == set()
+    assert coordinator.logged_poll_errors == set()
+
+
+class UnmappedError(HassetteClientError):
+    """A client error no poll mapping row covers."""
+
+
+async def test_unexpected_errors_are_logged_once_per_outage(
+    hass: HomeAssistant,
+    client: MagicMock,
+    loaded_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def unexpected_warnings() -> list[logging.LogRecord]:
+        return [
+            record
+            for record in caplog.records
+            if record.levelno == logging.WARNING and record.getMessage().startswith("Unexpected error polling")
+        ]
+
+    client.get_apps.side_effect = UnmappedError("boom")
+    await poll(hass, freezer)
+    await poll(hass, freezer)
+    assert len(unexpected_warnings()) == 1
+    assert unexpected_warnings()[0].exc_info is not None
+
+    client.get_apps.side_effect = None
+    await poll(hass, freezer)
+    client.get_apps.side_effect = UnmappedError("boom")
+    await poll(hass, freezer)
+    assert len(unexpected_warnings()) == 2
