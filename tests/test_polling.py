@@ -160,6 +160,7 @@ async def test_unreadable_responses_are_logged_once_per_outage(
         )
         await poll(hass, freezer)
     assert coordinator.logged_validation_errors == {("GET /api/apps", "UnexpectedResponseError")}
+    assert coordinator.last_exception.translation_key == "poll_unexpected_response"
 
     client.get_apps.side_effect = None
     await poll(hass, freezer)

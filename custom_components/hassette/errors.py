@@ -64,6 +64,8 @@ FORM_ERRORS: tuple[ErrorRow, ...] = (
     (HassetteConnectionError, "cannot_connect"),
     (GatewayError, "cannot_connect"),
     (ServiceUnavailableError, "cannot_connect"),
+    # Something other than hassette answered (a proxy's login page, say). Before its base class.
+    (UnexpectedResponseError, "unexpected_response"),
     (ResponseValidationError, "cannot_connect"),
 )
 
@@ -77,6 +79,8 @@ POLL_ERRORS: tuple[ErrorRow, ...] = (
     (HassetteConnectionError, "cannot_connect"),
     (HassetteTimeoutError, "timeout_connect"),
     (ForbiddenError, "forbidden"),
+    # Something other than hassette answered (a proxy's login page, say). Before its base class.
+    (UnexpectedResponseError, "poll_unexpected_response"),
     (ResponseValidationError, "invalid_response"),
 )
 

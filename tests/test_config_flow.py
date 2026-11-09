@@ -14,6 +14,7 @@ from hassette_client import (
     RedirectError,
     ResponseValidationError,
     ServiceUnavailableError,
+    UnexpectedResponseError,
 )
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import CONF_API_TOKEN, CONF_URL, CONF_VERIFY_SSL
@@ -34,6 +35,17 @@ FORM_ERRORS: list[tuple[Exception, str]] = [
     (http_error(ServiceUnavailableError, 503), "cannot_connect"),
     (http_error(ForbiddenError, 403), "forbidden"),
     (ResponseValidationError(model="SystemStatusResponse", endpoint="GET /api/health", problems=[]), "cannot_connect"),
+    (
+        UnexpectedResponseError(
+            model="SystemStatusResponse",
+            endpoint="GET /api/health",
+            status=200,
+            content_type="text/html",
+            body_size=100,
+            body_excerpt="<html>",
+        ),
+        "unexpected_response",
+    ),
     (http_error(NotFoundError, 404), "unknown"),
     (HassetteClientError("other"), "unknown"),
     (RuntimeError("bug"), "unknown"),
