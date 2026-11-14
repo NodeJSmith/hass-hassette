@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.5.0...v0.6.0) (2026-11-14)
+
+
+### Features
+
+* add a hassette.send action that fires a hassette_action event ([#62](https://github.com/NodeJSmith/hass-hassette/issues/62)) ([bce4b16](https://github.com/NodeJSmith/hass-hassette/commit/bce4b1656502d1859f008bc90a937b41c8302cca))
+* show an app's description as its device model ([#44](https://github.com/NodeJSmith/hass-hassette/issues/44)) ([8243af4](https://github.com/NodeJSmith/hass-hassette/commit/8243af4a388fd49dd017a64491f3148b512324cb))
+
+
+### Bug Fixes
+
+* show a proxy-specific error when a non-JSON page answers the config flow or poll ([#56](https://github.com/NodeJSmith/hass-hassette/issues/56)) ([8ba5986](https://github.com/NodeJSmith/hass-hassette/commit/8ba59869c40449ab6bdb6066fe2d9e2e23cf2255))
+
+
+### Documentation
+
+* update README install steps for the HA 2026.11 Marketplace ([#15](https://github.com/NodeJSmith/hass-hassette/issues/15)) ([103ff99](https://github.com/NodeJSmith/hass-hassette/commit/103ff9949b277c82c73802164c72490ad44930d9)), closes [#12](https://github.com/NodeJSmith/hass-hassette/issues/12)
+
 ## [0.5.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.4.1...v0.5.0) (2026-11-03)
 
 ### Breaking Changes
