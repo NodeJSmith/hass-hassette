@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.6.0...v0.7.0) (2026-11-14)
+
+
+### Features
+
+* hassette.send now fails when hassette isn't connected to Home Assistant ([#65](https://github.com/NodeJSmith/hass-hassette/issues/65)) ([c980826](https://github.com/NodeJSmith/hass-hassette/commit/c980826063d3b26eb24208177b54f5b95c6bf7e2))
+
 ## [0.6.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.5.0...v0.6.0) (2026-11-14)
 
 ### Features
