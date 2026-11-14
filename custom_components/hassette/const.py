@@ -42,5 +42,13 @@ ADDON_SLUG_SUFFIX: Final = "_hassette"
 # The name AddonManager puts in its log and error messages.
 ADDON_NAME: Final = "Hassette"
 
+# The status sensor's extra state attributes.
 ATTR_SERVER_STATUS: Final = "server_status"
 ATTR_ERROR_MESSAGE: Final = "error_message"
+
+# The hassette.send action (Home Assistant's code still calls actions services) fires EVENT_ACTION with
+# its ATTR_NAME and ATTR_DATA fields. hassette publishes it to apps as the topic "hass.event.hassette_action".
+SERVICE_SEND: Final = "send"
+EVENT_ACTION: Final = "hassette_action"
+ATTR_NAME: Final = "name"
+ATTR_DATA: Final = "data"

@@ -3,12 +3,15 @@
 import json
 from pathlib import Path
 
+import yaml
+
 from custom_components.hassette import errors
 from custom_components.hassette.sensor import STATUS
 
 INTEGRATION = Path(__file__).parent.parent / "custom_components" / "hassette"
 STRINGS = json.loads((INTEGRATION / "translations" / "en.json").read_text())
 ICONS = json.loads((INTEGRATION / "icons.json").read_text())
+SERVICES = yaml.safe_load((INTEGRATION / "services.yaml").read_text())
 
 
 def keys(rows: tuple[errors.ErrorRow, ...]) -> set[str]:
@@ -36,3 +39,14 @@ def test_status_states_are_translated_and_have_icons() -> None:
     assert STATUS.options is not None
     assert set(STATUS.options) == set(STRINGS["entity"]["sensor"]["status"]["state"])
     assert set(STATUS.options) == set(ICONS["entity"]["sensor"]["status"]["state"])
+
+
+def test_services_agree_across_services_yaml_translations_and_icons() -> None:
+    assert set(SERVICES) == set(STRINGS["services"]) == set(ICONS["services"])
+    for name, spec in SERVICES.items():
+        assert set(spec["fields"]) == set(STRINGS["services"][name]["fields"])
+
+
+def test_send_fields_required_as_the_schema_requires() -> None:
+    fields = SERVICES["send"]["fields"]
+    assert (fields["name"]["required"], fields["data"]["required"]) == (True, False)
