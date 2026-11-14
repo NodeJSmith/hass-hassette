@@ -1,13 +1,18 @@
 """Tests for the hassette.send action."""
 
+from unittest.mock import AsyncMock, MagicMock
+
 import probatio
 import pytest
+from hassette_client import HassetteConnectionError
 from homeassistant.core import Context, Event, HomeAssistant, callback
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.hassette.const import DOMAIN, EVENT_ACTION, SERVICE_SEND
+
+from .conftest import make_health
 
 
 @pytest.fixture
@@ -81,4 +86,35 @@ async def test_send_refuses_without_an_entry(hass: HomeAssistant, events: list[E
     with pytest.raises(ServiceValidationError) as raised:
         await hass.services.async_call(DOMAIN, SERVICE_SEND, {"name": "tracker_done"}, blocking=True)
     assert raised.value.translation_key == "service_found_no_config_entry_for_domain"
+    assert events == []
+
+
+@pytest.mark.parametrize(
+    ("failure", "key"),
+    [
+        pytest.param({"side_effect": HassetteConnectionError()}, "send_unreachable", id="unreachable"),
+        pytest.param({"side_effect": TimeoutError()}, "send_unreachable", id="timeout"),
+        pytest.param({"return_value": make_health(websocket_connected=False)}, "send_disconnected", id="ws-down"),
+    ],
+)
+async def test_send_refuses_when_hassette_cannot_receive(
+    hass: HomeAssistant, loaded_entry: MockConfigEntry, client: MagicMock, events: list[Event], failure: dict, key: str
+) -> None:
+    client.get_health = AsyncMock(**failure)
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await hass.services.async_call(DOMAIN, SERVICE_SEND, {"name": "tracker_done"}, blocking=True)
+    assert raised.value.translation_key == key
+    await hass.async_block_till_done()
+    assert events == []
+
+
+async def test_send_reads_health_live_not_from_the_last_poll(
+    hass: HomeAssistant, loaded_entry: MockConfigEntry, client: MagicMock, events: list[Event]
+) -> None:
+    # The last poll saw a connected websocket; the live read now sees it down.
+    client.get_health = AsyncMock(return_value=make_health(websocket_connected=False))
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(DOMAIN, SERVICE_SEND, {"name": "tracker_done"}, blocking=True)
     assert events == []

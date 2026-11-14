@@ -49,6 +49,8 @@ ATTR_ERROR_MESSAGE: Final = "error_message"
 # The hassette.send action (Home Assistant's code still calls actions services) fires EVENT_ACTION with
 # its ATTR_NAME and ATTR_DATA fields. hassette publishes it to apps as the topic "hass.event.hassette_action".
 SERVICE_SEND: Final = "send"
+# How long hassette.send waits for hassette's health before refusing to send.
+SEND_HEALTH_TIMEOUT: Final = 4.0
 EVENT_ACTION: Final = "hassette_action"
 ATTR_NAME: Final = "name"
 ATTR_DATA: Final = "data"
