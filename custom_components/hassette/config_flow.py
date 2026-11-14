@@ -9,7 +9,6 @@ from hassette_client import (
     AuthenticationError,
     HassetteClient,
     HassetteClientError,
-    RedirectError,
     UnsupportedServerVersionError,
     check_server_version,
 )
@@ -23,7 +22,7 @@ from yarl import URL
 
 from .addon import announced_connection, normalize_token
 from .const import ADDON_SLUG_SUFFIX, CONF_ADDON_SLUG, DEFAULT_VERIFY_SSL, DOMAIN
-from .errors import FORM_ERRORS, lookup, redirect_target, version_placeholders
+from .errors import form_error, version_placeholders
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -171,12 +170,7 @@ class HassetteConfigFlow(ConfigFlow, domain=DOMAIN):
             # With no token, the 401 means hassette doesn't trust Home Assistant's address as a proxy.
             errors["base"] = "invalid_auth" if token else "token_required"
         except HassetteClientError as exc:
-            if isinstance(exc, RedirectError):
-                self.placeholders = {"location": redirect_target(exc)}
-            if (key := lookup(FORM_ERRORS, exc)) is None:
-                _LOGGER.exception("hassette-client raised an error this integration doesn't map")
-                key = "unknown"
-            errors["base"] = key
+            errors["base"], self.placeholders = form_error(exc)
         except Exception:
             _LOGGER.exception("Unexpected error connecting to hassette")
             errors["base"] = "unknown"

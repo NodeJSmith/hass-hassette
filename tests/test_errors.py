@@ -17,7 +17,7 @@ from hassette_client import (
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from custom_components.hassette.errors import poll_error, redirect_target, truncate_detail
+from custom_components.hassette.errors import form_error, poll_error, redirect_target, truncate_detail
 
 from .conftest import http_error
 
@@ -64,3 +64,14 @@ def test_redirect_target(location: str | None, shown: str) -> None:
 
 def test_truncate_keeps_short_text() -> None:
     assert truncate_detail("short") == "short"
+
+
+def test_form_error_maps_redirect_with_location() -> None:
+    error = http_error(RedirectError, 307, location="https://login.example.com/auth?state=x")
+
+    assert form_error(error) == ("redirected", {"location": "https://login.example.com/auth"})
+
+
+def test_form_error_logs_unmapped_error(caplog: pytest.LogCaptureFixture) -> None:
+    assert form_error(http_error(NotFoundError, 404)) == ("unknown", {})
+    assert "doesn't map" in caplog.text
