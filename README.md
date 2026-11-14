@@ -157,9 +157,12 @@ async def on_message(self, event) -> None:
         ...
 ```
 
-The action fails while the integration isn't loaded. It doesn't check that hassette is connected:
-hassette receives the event over its own connection to Home Assistant, so an event fired while that
-connection is down is lost. If hassette's entities are unavailable, assume a message may not arrive.
+Before it fires, the action reads hassette's health live and checks that hassette's websocket to
+Home Assistant is up, since that connection is how hassette receives the event. It fails, and fires
+nothing, while the integration isn't loaded, when hassette doesn't answer within a few seconds, or when
+it answers that it's disconnected from Home Assistant. A call that returns without an error fired the
+event while hassette was connected. It can still be lost if the connection drops right after the check,
+and the action can't tell whether an app acted on it.
 
 ## Known limitations
 

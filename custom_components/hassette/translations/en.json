@@ -96,6 +96,12 @@
     "action_in_progress": {
       "message": "Another action on this app is still running. Try again when it finishes."
     },
+    "send_disconnected": {
+      "message": "hassette isn't connected to Home Assistant, so the message wasn't delivered. Try again when it reconnects."
+    },
+    "send_unreachable": {
+      "message": "Couldn't check that hassette is connected, so the message wasn't sent. Try again when hassette is back."
+    },
     "needs_restart": {
       "message": "Restart hassette before acting on this app: {detail}"
     },
@@ -157,7 +163,7 @@
   "services": {
     "send": {
       "name": "Send",
-      "description": "Sends a message to hassette apps by firing a hassette_action event on Home Assistant's event bus.",
+      "description": "Sends a message to hassette apps by firing a hassette_action event on Home Assistant's event bus. Fails, and sends nothing, if hassette is unreachable or isn't connected to Home Assistant.",
       "fields": {
         "name": {
           "name": "Name",
