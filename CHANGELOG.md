@@ -2,21 +2,19 @@
 
 ## [0.6.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.5.0...v0.6.0) (2026-11-14)
 
-
 ### Features
 
-* add a hassette.send action that fires a hassette_action event ([#62](https://github.com/NodeJSmith/hass-hassette/issues/62)) ([bce4b16](https://github.com/NodeJSmith/hass-hassette/commit/bce4b1656502d1859f008bc90a937b41c8302cca))
-* show an app's description as its device model ([#44](https://github.com/NodeJSmith/hass-hassette/issues/44)) ([8243af4](https://github.com/NodeJSmith/hass-hassette/commit/8243af4a388fd49dd017a64491f3148b512324cb))
-
+- **New `hassette.send` action.** A dashboard button, script or automation can now message your hassette apps without a helper entity. It takes a `name` and an optional `data` mapping, and fires them as a `hassette_action` event, which apps receive on the topic `hass.event.hassette_action`. The action fails while the integration isn't loaded, but it doesn't check that hassette is connected, so a message sent while hassette's connection to Home Assistant is down is lost. See the README's Actions section for an example. (#62)
+- **App descriptions show on their devices.** When an app has a description in hassette, its device shows the description as its model, with the class name as the model ID. Adding, changing or removing a description updates the device on the next poll. (#44)
 
 ### Bug Fixes
 
-* show a proxy-specific error when a non-JSON page answers the config flow or poll ([#56](https://github.com/NodeJSmith/hass-hassette/issues/56)) ([8ba5986](https://github.com/NodeJSmith/hass-hassette/commit/8ba59869c40449ab6bdb6066fe2d9e2e23cf2255))
-
+- **Clearer error behind a proxy.** When something other than hassette answers the configured URL, typically a proxy's login page, the config flow and the integration now say so and point you at letting Home Assistant reach hassette's `/api/` through the proxy, instead of reporting "cannot connect" or "invalid response". (#56)
+- **Unexpected poll errors are logged with their cause.** A poll failure without a specific message (a plain 500 or 404, say) is now logged once at warning with its traceback, instead of only at debug, so the log says what went wrong behind "Unexpected error from hassette". (#58)
 
 ### Documentation
 
-* update README install steps for the HA 2026.11 Marketplace ([#15](https://github.com/NodeJSmith/hass-hassette/issues/15)) ([103ff99](https://github.com/NodeJSmith/hass-hassette/commit/103ff9949b277c82c73802164c72490ad44930d9)), closes [#12](https://github.com/NodeJSmith/hass-hassette/issues/12)
+- **Install steps for the Home Assistant 2026.11 Marketplace.** The README covers installing, pairing and removing the integration through the Marketplace, with the HACS steps kept for earlier versions. (#15)
 
 ## [0.5.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.4.1...v0.5.0) (2026-11-03)
 
