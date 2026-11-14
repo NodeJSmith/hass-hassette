@@ -58,12 +58,7 @@ class HassetteAppEntity(CoordinatorEntity[HassetteCoordinator]):
     @property
     def available(self) -> bool:
         app = self.app
-        return (
-            super().available
-            and self.coordinator.data.health.bootstrap_released
-            and app is not None
-            and app.in_current_config
-        )
+        return self.coordinator.app_list_trusted and app is not None and app.in_current_config
 
 
 class HassetteControlEntity(HassetteAppEntity):

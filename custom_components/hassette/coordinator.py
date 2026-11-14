@@ -209,6 +209,15 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
             # The registry writes, and fires an update event, only when a value differs.
             devices.async_update_device(device.id, **app_device_fields(app), via_device_id=hub_id)
 
+    @property
+    def app_list_trusted(self) -> bool:
+        """Whether the app list can be acted on: the poll is good (or tolerated) and app startup was released.
+
+        Before release, hassette's list can be missing apps it hasn't written yet. Entity availability and
+        device removal both gate on this, so they never disagree about whether the list is complete.
+        """
+        return self.last_update_success and self.data.health.bootstrap_released
+
     def within_tolerance(self) -> bool:
         """Whether a transient failure may keep the previous data: entities are up and the last good poll is recent."""
         return (
