@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.5.0...v0.6.0) (2026-11-14)
+
+### Features
+
+- **New `hassette.send` action.** A dashboard button, script or automation can now message your hassette apps without a helper entity. It takes a `name` and an optional `data` mapping, and fires them as a `hassette_action` event, which apps receive on the topic `hass.event.hassette_action`. The action fails while the integration isn't loaded, but it doesn't check that hassette is connected, so a message sent while hassette's connection to Home Assistant is down is lost. See the README's Actions section for an example. (#62)
+- **App descriptions show on their devices.** When an app has a description in hassette, its device shows the description as its model, with the class name as the model ID. Adding, changing or removing a description updates the device on the next poll. (#44)
+
+### Bug Fixes
+
+- **Clearer error behind a proxy.** When something other than hassette answers the configured URL, typically a proxy's login page, the config flow and the integration now say so and point you at letting Home Assistant reach hassette's `/api/` through the proxy, instead of reporting "cannot connect" or "invalid response". (#56)
+- **Unexpected poll errors are logged with their cause.** A poll failure without a specific message (a plain 500 or 404, say) is now logged once at warning with its traceback, instead of only at debug, so the log says what went wrong behind "Unexpected error from hassette". (#58)
+
+### Documentation
+
+- **Install steps for the Home Assistant 2026.11 Marketplace.** The README covers installing, pairing and removing the integration through the Marketplace, with the HACS steps kept for earlier versions. (#15)
+
 ## [0.5.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.4.1...v0.5.0) (2026-11-03)
 
 ### Breaking Changes
