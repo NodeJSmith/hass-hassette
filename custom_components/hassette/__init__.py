@@ -74,7 +74,7 @@ async def async_remove_config_entry_device(
     if entry.state is not ConfigEntryState.LOADED:
         return False
     coordinator = entry.runtime_data
-    if not coordinator.last_update_success or not coordinator.data.health.bootstrap_released:
+    if not coordinator.app_list_trusted:
         return False
     apps = coordinator.data.apps
     for domain, identifier in device.identifiers:

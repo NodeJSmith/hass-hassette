@@ -13,10 +13,11 @@ a new or moved row sit after its own base class (as `UnexpectedResponseError` mu
 the key sets `tests/test_translations.py` checks?
 
 ## Availability Parity
-`HassetteAppEntity.available` requires a good poll (within tolerance), `bootstrap_released` and the
-app in hassette's current config. Does a new entity, action or removal path (such as
-`async_remove_config_entry_device`) make a decision about an app using a weaker check, and act on
-an app list that may be incomplete?
+`HassetteCoordinator.app_list_trusted` is the one gate for whether hassette's app list can be acted
+on: a good poll (within tolerance) taken after `bootstrap_released`. `HassetteAppEntity.available`
+and `async_remove_config_entry_device` both check it. Does a new entity, action or removal path make
+a decision about an app without going through `app_list_trusted`, re-deriving the gate inline or
+using a weaker check, and so act on an app list that may be incomplete?
 
 ## Sibling Parity
 `switch.py`, `button.py` and `sensor.py` each build entities through `add_app_entities`. Does a new
