@@ -1,0 +1,13 @@
+send:
+  fields:
+    name:
+      required: true
+      example: tracker_done
+      selector:
+        text:
+    data:
+      required: false
+      example:
+        room: kitchen
+      selector:
+        object:

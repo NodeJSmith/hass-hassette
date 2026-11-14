@@ -4,14 +4,25 @@ from hassette_client import HassetteClient
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_API_TOKEN, CONF_URL, CONF_VERIFY_SSL, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.helpers.typing import ConfigType
 
 from .const import ACTION_TIMEOUT, DOMAIN, ISSUE_UNSUPPORTED_VERSION, SERVER_DEVICE_ID
 from .coordinator import HassetteConfigEntry, HassetteCoordinator
+from .services import async_setup_services
 
 PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.SENSOR, Platform.SWITCH]
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the actions once, so automations using them validate even while the entry isn't loaded."""
+    async_setup_services(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: HassetteConfigEntry) -> bool:

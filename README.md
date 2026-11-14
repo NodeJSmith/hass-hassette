@@ -117,6 +117,50 @@ The integration polls hassette every 30 seconds, and again right after every swi
 action. One failed poll is ignored; after two in a row, the app entities become unavailable until
 hassette answers again.
 
+## Actions
+
+### `hassette.send`
+
+Sends a message to your hassette apps by firing a `hassette_action` event on Home Assistant's event
+bus. A dashboard button or a script can use it to trigger an app without a helper entity.
+
+| Field | Required | Description |
+|---|---|---|
+| `name` | Yes | What the message is. Apps match on it to decide whether to act. |
+| `data` | No | A mapping of extra values passed with the message. Defaults to `{}`. |
+
+For example, a dashboard button. The outer `data` is the action's data; the inner `data` is the
+field:
+
+```yaml
+type: button
+name: Tracker done
+tap_action:
+  action: perform-action
+  perform_action: hassette.send
+  data:
+    name: tracker_done
+    data:
+      room: kitchen
+```
+
+hassette publishes every Home Assistant event to its apps, so an app receives this one on the topic
+`hass.event.hassette_action`. The event's data is `{"name": ..., "data": ...}`:
+
+```python
+async def on_initialize(self) -> None:
+    await self.bus.on(topic="hass.event.hassette_action", handler=self.on_message, name="tracker.message")
+
+async def on_message(self, event) -> None:
+    if event.payload.data["name"] == "tracker_done":
+        room = event.payload.data["data"].get("room")
+        ...
+```
+
+The action fails while the integration isn't loaded. It doesn't check that hassette is connected:
+hassette receives the event over its own connection to Home Assistant, so an event fired while that
+connection is down is lost. If hassette's entities are unavailable, assume a message may not arrive.
+
 ## Known limitations
 
 - **A stop doesn't survive a hassette restart.** Stopping an app from Home Assistant stops it until

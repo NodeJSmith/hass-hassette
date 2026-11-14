@@ -153,5 +153,21 @@
       "description": "hassette {server_version} serves API schema {api_schema_version}, but the Hassette integration needs schema {min_api_schema_version} or newer, so its apps are unavailable in Home Assistant.\n\nUpgrade hassette. The integration reconnects on its own within 10 minutes, and this message clears.",
       "title": "hassette is too old for the Hassette integration"
     }
+  },
+  "services": {
+    "send": {
+      "name": "Send",
+      "description": "Sends a message to hassette apps by firing a hassette_action event on Home Assistant's event bus.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "What the message is. Apps match on it to decide whether to act."
+        },
+        "data": {
+          "name": "Data",
+          "description": "Extra values passed to the app with the message."
+        }
+      }
+    }
   }
 }
