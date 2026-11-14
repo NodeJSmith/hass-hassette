@@ -1,3 +1,9 @@
+---
+audience: open-source library
+developers: solo
+data-sensitivity: personal
+---
+
 # CLAUDE.md
 
 hass-hassette is the Home Assistant custom integration for [hassette](https://github.com/NodeJSmith/hassette). It connects Home Assistant to one hassette server and gives each hassette app a device with a switch, a reload button and a status sensor. `README.md` describes it from a user's side.
