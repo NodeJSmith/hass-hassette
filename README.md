@@ -157,9 +157,11 @@ async def on_message(self, event) -> None:
         ...
 ```
 
-The action fails while the integration isn't loaded. It doesn't check that hassette is connected:
-hassette receives the event over its own connection to Home Assistant, so an event fired while that
-connection is down is lost. If hassette's entities are unavailable, assume a message may not arrive.
+The action fails while the integration isn't loaded, and while hassette's entities are unavailable
+because the integration can't reach hassette, so a dashboard or script shows the error instead of
+losing the message. That check uses the integration's last poll: hassette receives the event over its
+own connection to Home Assistant, so an event fired between hassette going down and the next poll, or
+while hassette answers polls but that connection is down, is still lost.
 
 ## Known limitations
 

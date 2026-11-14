@@ -132,6 +132,9 @@
     "redirected": {
       "message": "hassette's API redirected to {location}. If that is a login page, add a bypass for /api/ to the proxy in front of hassette."
     },
+    "send_not_connected": {
+      "message": "hassette isn't connected; the message wasn't delivered."
+    },
     "telemetry_unavailable": {
       "message": "hassette couldn't read its telemetry database, so it can't list apps."
     },

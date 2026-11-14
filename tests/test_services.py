@@ -1,13 +1,20 @@
 """Tests for the hassette.send action."""
 
+from unittest.mock import MagicMock
+
 import probatio
 import pytest
+from freezegun.api import FrozenDateTimeFactory
+from hassette_client import HassetteConnectionError
+from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import Context, Event, HomeAssistant, callback
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.hassette.const import DOMAIN, EVENT_ACTION, SERVICE_SEND
+
+from .conftest import SWITCH, poll
 
 
 @pytest.fixture
@@ -82,3 +89,30 @@ async def test_send_refuses_without_an_entry(hass: HomeAssistant, events: list[E
         await hass.services.async_call(DOMAIN, SERVICE_SEND, {"name": "tracker_done"}, blocking=True)
     assert raised.value.translation_key == "service_found_no_config_entry_for_domain"
     assert events == []
+
+
+async def test_send_refuses_while_hassette_is_unreachable(
+    hass: HomeAssistant,
+    client: MagicMock,
+    loaded_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    events: list[Event],
+) -> None:
+    client.get_health.side_effect = HassetteConnectionError("refused")
+    # The first failed poll is tolerated; the second makes the entities unavailable.
+    await poll(hass, freezer)
+    await hass.services.async_call(DOMAIN, SERVICE_SEND, {"name": "tracker_done"}, blocking=True)
+    await poll(hass, freezer)
+    assert hass.states.get(SWITCH).state == STATE_UNAVAILABLE
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await hass.services.async_call(DOMAIN, SERVICE_SEND, {"name": "tracker_done"}, blocking=True)
+    assert raised.value.translation_key == "send_not_connected"
+    await hass.async_block_till_done()
+    assert len(events) == 1
+
+    client.get_health.side_effect = None
+    await poll(hass, freezer)
+    await hass.services.async_call(DOMAIN, SERVICE_SEND, {"name": "tracker_done"}, blocking=True)
+    await hass.async_block_till_done()
+    assert len(events) == 2
