@@ -165,6 +165,14 @@ def is_mapped_poll_error(exc: HassetteClientError) -> bool:
     return isinstance(exc, AuthenticationError) or lookup(POLL_ERRORS, exc) is not None
 
 
+def form_error(exc: HassetteClientError) -> tuple[str, dict[str, str]]:
+    """Map a failed config-flow connection check to the form's base error key and its placeholders."""
+    if (key := lookup(FORM_ERRORS, exc)) is None:
+        _LOGGER.error("hassette-client raised an error this integration doesn't map", exc_info=exc)
+        key = "unknown"
+    return key, placeholders_for(exc) or {}
+
+
 def poll_error(exc: HassetteClientError) -> HomeAssistantError:
     """Map a failed coordinator poll to the error the coordinator should raise."""
     if isinstance(exc, AuthenticationError):
