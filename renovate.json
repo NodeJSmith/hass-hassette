@@ -4,6 +4,7 @@
     "Per-repo Renovate config, processed by the maintainer's self-hosted runner.",
     "hassette-client is pinned twice: in manifest.json (what HA installs) and in the test dependency group (what CI tests). One grouped PR bumps both; tests/test_manifest.py fails if they drift.",
     "The HA-floor CI job pins its own pytest-homeassistant-custom-component in tests.yml, outside Renovate's reach on purpose: the floor moves only when the code needs a newer HA, together with hacs.json.",
+    "Non-major updates automerge through GitHub auto-merge once the required checks pass, after minimumReleaseAge holds each release for 3 days (timestamp-optional, so Action digests without a release timestamp aren't held forever). Major updates also automerge for dev tooling only (dependency-groups, GitHub Actions): if one breaks, CI fails and the autofix reviewer picks it up. Majors of runtime dependencies (hassette-client in manifest.json) never automerge.",
     "customManagers tracks each GitHub-hosted hook repo's rev in prek.toml against its tags: Renovate's built-in pre-commit manager only reads .pre-commit-config.yaml, so prek.toml pins would otherwise go stale silently."
   ],
   "extends": [
@@ -15,6 +16,8 @@
   "timezone": "America/New_York",
   "semanticCommits": "enabled",
   "prConcurrentLimit": 5,
+  "minimumReleaseAge": "3 days",
+  "minimumReleaseAgeBehaviour": "timestamp-optional",
   "customManagers": [
     {
       "description": "prek.toml hook repo revs (each `repo = \"https://github.com/...\"` line followed directly by its `rev = ...` line)",
@@ -30,6 +33,17 @@
   ],
   "packageRules": [
     {
+      "description": "Automerge non-major updates once the required checks pass",
+      "matchUpdateTypes": ["minor", "patch", "digest", "pinDigest"],
+      "automerge": true
+    },
+    {
+      "description": "Automerge major updates of dev tooling once the required checks pass; runtime dependency majors stay manual",
+      "matchUpdateTypes": ["major"],
+      "matchDepTypes": ["dependency-groups", "action", "workflow"],
+      "automerge": true
+    },
+    {
       "description": "A client bump changes what users install, so it is a fix that release-please releases.",
       "matchPackageNames": [
         "hassette-client"
@@ -40,17 +54,6 @@
       "schedule": [
         "at any time"
       ]
-    },
-    {
-      "description": "Python follows Home Assistant's supported version, so only patch bumps are automatic.",
-      "matchPackageNames": [
-        "python"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "major"
-      ],
-      "enabled": false
     },
     {
       "description": "Dev and CI dependencies don't reach users and stay out of the changelog.",
@@ -86,6 +89,12 @@
         "pinDigest"
       ],
       "groupName": "prek tooling"
+    },
+    {
+      "description": "Python follows Home Assistant's supported version, so only patch bumps happen. After every automerge rule so it wins. matchDepNames, not matchPackageNames: the package names are python/cpython (mise) and actions/python-versions (setup-python).",
+      "matchDepNames": ["python"],
+      "matchUpdateTypes": ["minor", "major"],
+      "enabled": false
     }
   ]
 }
