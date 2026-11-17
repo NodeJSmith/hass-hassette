@@ -163,7 +163,7 @@
   "services": {
     "send": {
       "name": "Send",
-      "description": "Sends a message to hassette apps by firing a hassette_action event on Home Assistant's event bus. Fails, and sends nothing, if hassette is unreachable or isn't connected to Home Assistant.",
+      "description": "Sends a message to hassette apps by firing a hassette_message event on Home Assistant's event bus. Fails, and sends nothing, if hassette is unreachable or isn't connected to Home Assistant.",
       "fields": {
         "name": {
           "name": "Name",

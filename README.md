@@ -121,7 +121,7 @@ hassette answers again.
 
 ### `hassette.send`
 
-Sends a message to your hassette apps by firing a `hassette_action` event on Home Assistant's event
+Sends a message to your hassette apps by firing a `hassette_message` event on Home Assistant's event
 bus. A dashboard button or a script can use it to trigger an app without a helper entity.
 
 | Field | Required | Description |
@@ -144,16 +144,27 @@ tap_action:
       room: kitchen
 ```
 
-hassette publishes every Home Assistant event to its apps, so an app receives this one on the topic
-`hass.event.hassette_action`. The event's data is `{"name": ..., "data": ...}`:
+hassette receives it as a `hassette_message` event, on the topic `hass.event.hassette_message`, with
+the data `{"name": ..., "data": ...}`. An app subscribes to a message by its name and gets the inner
+`data` as a typed object. This needs hassette 0.65.0 or later:
 
 ```python
-async def on_initialize(self) -> None:
-    await self.bus.on(topic="hass.event.hassette_action", handler=self.on_message, name="tracker.message")
+from dataclasses import dataclass
 
-async def on_message(self, event) -> None:
-    if event.payload.data["name"] == "tracker_done":
-        room = event.payload.data["data"].get("room")
+from hassette import App, D
+
+
+@dataclass
+class TrackerDone:
+    room: str | None = None
+
+
+class Tracker(App):
+    async def on_initialize(self) -> None:
+        await self.bus.on_hassette_message("tracker_done", handler=self.on_tracker_done, name="tracker.done")
+
+    async def on_tracker_done(self, data: D.MessageData[TrackerDone]) -> None:
+        room = data.room
         ...
 ```
 
