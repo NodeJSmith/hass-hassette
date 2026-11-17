@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.7.0...v0.8.0) (2026-11-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* rename the hassette.send event to hassette_message ([#76](https://github.com/NodeJSmith/hass-hassette/issues/76))
+
+### Features
+
+* rename the hassette.send event to hassette_message ([#76](https://github.com/NodeJSmith/hass-hassette/issues/76)) ([afd3cfa](https://github.com/NodeJSmith/hass-hassette/commit/afd3cfa90cbb4e1d467e170549b95517d83775f0))
+
+
+### Bug Fixes
+
+* **deps:** update dependency hassette-client to v0.63.0 ([#41](https://github.com/NodeJSmith/hass-hassette/issues/41)) ([1d832b6](https://github.com/NodeJSmith/hass-hassette/commit/1d832b683503738e4b57dc4f758b8ac6ae3848be))
+
 ## [0.7.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.6.0...v0.7.0) (2026-11-14)
 
 
