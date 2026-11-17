@@ -2,6 +2,7 @@
 audience: open-source library
 developers: solo
 data-sensitivity: personal
+peers: Node-RED Companion (hass-node-red), NetDaemon integration, AppDaemon, pyscript
 ---
 
 # CLAUDE.md
