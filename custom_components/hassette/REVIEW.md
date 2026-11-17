@@ -2,7 +2,7 @@
 
 ## Public Surface
 Does the change alter any entity's `unique_id` (`app_unique_id` in `entity.py`), a key the config
-flow stores in `entry.data`, or the `hassette.send` fields or `hassette_action` event payload? Each
+flow stores in `entry.data`, or the `hassette.send` fields or `hassette_message` event payload? Each
 of those is something users' entities, history or automations depend on. If one changed, does the
 issue ask for it, and is there a migration?
 

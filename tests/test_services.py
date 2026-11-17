@@ -10,21 +10,21 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.hassette.const import DOMAIN, EVENT_ACTION, SERVICE_SEND
+from custom_components.hassette.const import DOMAIN, EVENT_MESSAGE, SERVICE_SEND
 
 from .conftest import make_health
 
 
 @pytest.fixture
 def events(hass: HomeAssistant) -> list[Event]:
-    """Every hassette_action event fired on the bus."""
+    """Every hassette_message event fired on the bus."""
     fired: list[Event] = []
 
     @callback
     def record(event: Event) -> None:
         fired.append(event)
 
-    hass.bus.async_listen(EVENT_ACTION, record)
+    hass.bus.async_listen(EVENT_MESSAGE, record)
     return fired
 
 
@@ -38,6 +38,8 @@ async def test_send_fires_the_event_with_the_callers_context(
     await hass.async_block_till_done()
 
     assert [event.data for event in events] == [{"name": "tracker_done", "data": {"room": "kitchen"}}]
+    # The literal is hassette's contract, so a change to the constant alone fails here.
+    assert events[0].event_type == "hassette_message"
     assert events[0].context is context
 
 

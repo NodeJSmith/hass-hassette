@@ -9,7 +9,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import service
 
-from .const import ATTR_DATA, ATTR_NAME, DOMAIN, EVENT_ACTION, SEND_HEALTH_TIMEOUT, SERVICE_SEND
+from .const import ATTR_DATA, ATTR_NAME, DOMAIN, EVENT_MESSAGE, SEND_HEALTH_TIMEOUT, SERVICE_SEND
 from .coordinator import HassetteConfigEntry
 
 SEND_SCHEMA = probatio.Schema(
@@ -43,7 +43,7 @@ async def handle_send(call: ServiceCall) -> None:
     if not health.websocket_connected:
         raise HomeAssistantError(translation_domain=DOMAIN, translation_key="send_disconnected")
     call.hass.bus.async_fire(
-        EVENT_ACTION,
+        EVENT_MESSAGE,
         {ATTR_NAME: call.data[ATTR_NAME], ATTR_DATA: call.data[ATTR_DATA]},
         context=call.context,
     )
