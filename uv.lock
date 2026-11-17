@@ -1226,7 +1226,7 @@ dev = [
     { name = "ruff", specifier = ">=0.14.9" },
 ]
 test = [
-    { name = "hassette-client", specifier = "==0.62.0" },
+    { name = "hassette-client", specifier = "==0.63.0" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "pytest-homeassistant-custom-component", specifier = "==0.13.375" },
 ]
@@ -1261,28 +1261,28 @@ wheels = [
 
 [[package]]
 name = "hassette-client"
-version = "0.62.0"
+version = "0.63.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "hassette-wire" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/74/ab/aa8b2105bd97b371759c9ef5c26c28b2d65a96f9a9ff57535361f3bb29a0/hassette_client-0.62.0.tar.gz", hash = "sha256:5312801341a8e088a388e597d571044cd48ced729832fee912edc8ba4a2084b1", size = 19414, upload-time = "2026-11-03T03:18:06.681Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8b/54/57d71be9fc8a90a4204d8ffb2096c9a17611eb2ddc8382db78dc7b8b949d/hassette_client-0.63.0.tar.gz", hash = "sha256:951d0de92859662373604bc95b3015df90253b666174d8b52e2e669ca76daef6", size = 19410, upload-time = "2026-11-04T18:57:58.708Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4d/8d/c2eacb566b4e53288618195c363eb74790c2d7a567b0de0330d87fd4482c/hassette_client-0.62.0-py3-none-any.whl", hash = "sha256:478b34032811b0806432ebe3c0081fdb2d89e303b1dfc5ec9620f12e075bbfe6", size = 22583, upload-time = "2026-11-03T03:18:05.347Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/d7/1cff7a47ac23001b6376ecc652f046062059b419b1ef88d2d118abdf4363/hassette_client-0.63.0-py3-none-any.whl", hash = "sha256:3a20cdce1ee52bd4e42b95391c88eb4aafcc8405e3cd54e3299fe54b60e9a6ae", size = 22583, upload-time = "2026-11-04T18:57:57.524Z" },
 ]
 
 [[package]]
 name = "hassette-wire"
-version = "0.62.0"
+version = "0.63.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a0/74/0232ea410807757c79dd20e279f753bcdd452fed6476f863cd96c24f7315/hassette_wire-0.62.0.tar.gz", hash = "sha256:a042e9e67874ee89bf388b6a855ef4fa0c3e97a9296c3969178ca48550feafc7", size = 25430, upload-time = "2026-11-03T03:17:17.671Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3d/31/3fea1117ddf4802cba482dddcca91af4d92f4926fefaf6fff685e527fee9/hassette_wire-0.63.0.tar.gz", hash = "sha256:b4ed9107395b9bbd83fd63b6098318ec59f118a0ceb65c05cc6845b0e7c0a904", size = 25514, upload-time = "2026-11-04T18:56:45.496Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0f/a3/129b830d505086e594d4b2ce9269919dea49d9160e7fa7c4b5923954818b/hassette_wire-0.62.0-py3-none-any.whl", hash = "sha256:0adc6c250a136fd7a3df38a88ba3baa550b9cb4b4ef551119dbe6136f05471f2", size = 31755, upload-time = "2026-11-03T03:17:16.543Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/2a/78ce6ac3951f908bd4bb87c86e25b4393ef4405cd524e19f818123ed060c/hassette_wire-0.63.0-py3-none-any.whl", hash = "sha256:188c424c4c05ded5c8dd8a93707e5c5b76f74d080dc982173bf9c74571852a94", size = 31851, upload-time = "2026-11-04T18:56:44.039Z" },
 ]
 
 [[package]]
