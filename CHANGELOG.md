@@ -1,11 +1,16 @@
 # Changelog
 
-## [0.7.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.6.0...v0.7.0) (2026-11-14)
+## [0.8.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.7.0...v0.8.0) (2026-11-17)
 
+### Breaking Changes
+
+- **`hassette.send` fires a `hassette_message` event instead of `hassette_action`.** Your hassette apps now receive messages on the topic `hass.event.hassette_message`. Any app or automation listening for `hassette_action`, or on `hass.event.hassette_action`, stops receiving messages until you change it to the new name. The action itself, its `name` and `data` fields, and your dashboard buttons and scripts that call it stay the same. The README's Actions example now uses hassette's typed message API (`bus.on_hassette_message`), which needs hassette 0.65.0 or later. (#76)
+
+## [0.7.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.6.0...v0.7.0) (2026-11-14)
 
 ### Features
 
-* hassette.send now fails when hassette isn't connected to Home Assistant ([#65](https://github.com/NodeJSmith/hass-hassette/issues/65)) ([c980826](https://github.com/NodeJSmith/hass-hassette/commit/c980826063d3b26eb24208177b54f5b95c6bf7e2))
+- **`hassette.send` fails when hassette isn't connected to Home Assistant.** Before it fires, the action checks hassette's health live and fails, firing nothing, when hassette doesn't answer within a few seconds or reports that its connection to Home Assistant is down. A call that returns without an error fired the event while hassette was connected. (#65)
 
 ## [0.6.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.5.0...v0.6.0) (2026-11-14)
 
