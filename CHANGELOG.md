@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.9.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.8.0...v0.9.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* require hassette 0.64 for hassette-client 0.65 ([#77](https://github.com/NodeJSmith/hass-hassette/issues/77))
+
+### Features
+
+* require hassette 0.64 for hassette-client 0.65 ([#77](https://github.com/NodeJSmith/hass-hassette/issues/77)) ([1000f5f](https://github.com/NodeJSmith/hass-hassette/commit/1000f5f244218592b2b32093d92e2ea887d444ff))
+
 ## [0.8.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.7.0...v0.8.0) (2026-11-17)
 
 ### Breaking Changes
