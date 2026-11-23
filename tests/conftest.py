@@ -4,7 +4,8 @@
 ``hassette_wire`` models and raise real ``hassette_client`` exceptions.
 """
 
-from collections.abc import Generator, Sequence
+import asyncio
+from collections.abc import Awaitable, Callable, Collection, Generator, Sequence
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -28,6 +29,7 @@ from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.hassette.const import DOMAIN, SCAN_INTERVAL
+from custom_components.hassette.stream import STREAM_TASK_NAME
 
 URL = "http://hassette.local:8126"
 ENTRY_ID = "01HASSETTEENTRY"
@@ -120,6 +122,67 @@ async def delete_device_and_poll(hass: HomeAssistant, freezer: FrozenDateTimeFac
     await poll(hass, freezer)
 
 
+class FakeStream:
+    """Stands in for ``HassetteClient.listen``: connects, awaits ``on_connected``, then passes on what tests send.
+
+    ``send`` delivers a message, or raises an exception out of ``listen`` to end the stream. ``connects`` counts
+    the streams started.
+    """
+
+    def __init__(self) -> None:
+        self.queue: asyncio.Queue[tuple[Any, asyncio.Future[None]]] = asyncio.Queue()
+        self.connects = 0
+
+    async def listen(
+        self,
+        on_message: Callable[[Any], Awaitable[None]],
+        *,
+        types: Collection[type[Any]],
+        on_connected: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
+        self.connects += 1
+        if on_connected is not None:
+            await on_connected()
+        while True:
+            item, delivered = await self.queue.get()
+            try:
+                if isinstance(item, BaseException):
+                    raise item
+                await on_message(item)
+            finally:
+                delivered.set_result(None)
+
+    def queue_item(self, item: Any) -> asyncio.Future[None]:
+        """Queue ``item`` and return a future that resolves once the stream has handled it."""
+        delivered = asyncio.get_running_loop().create_future()
+        self.queue.put_nowait((item, delivered))
+        return delivered
+
+    async def send(self, hass: HomeAssistant, item: Any) -> None:
+        """Deliver ``item`` and wait until it is handled and any refresh it scheduled has finished."""
+        await self.queue_item(item)
+        await settle(hass)
+
+
+async def settle(hass: HomeAssistant) -> None:
+    """Wait for pending work, including background refreshes, but not for the stream, which never ends on its own."""
+    await hass.async_block_till_done()
+    # wait_background_tasks would wait for the stream too, and hang; wait for the other background tasks instead.
+    # HA offers no public view of its background tasks.
+    while pending := [task for task in hass._background_tasks if not task.done() and not is_stream(task)]:
+        await asyncio.gather(*pending, return_exceptions=True)
+        await hass.async_block_till_done()
+
+
+def is_stream(task: asyncio.Task[Any]) -> bool:
+    return task.get_name().startswith(STREAM_TASK_NAME)
+
+
+def stream_running(hass: HomeAssistant) -> bool:
+    """Whether a /ws stream task is running."""
+    return any(is_stream(task) and not task.done() for task in hass._background_tasks)
+
+
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
     """Load the integration from custom_components/."""
@@ -129,13 +192,16 @@ def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
 def client() -> Generator[MagicMock]:
     """The polling ``HassetteClient``, with one app running.
 
-    The integration's action client (the one built with ``request_timeout``) is a separate mock at
+    Its ``listen`` is a ``FakeStream`` at ``client.stream``. The integration's action client (the one built
+    with ``request_timeout``) is a separate mock at
     ``client.action_client``; each mock fails a call meant for the other, so a call through the wrong
     client fails the test. Declared-entity commands go through the polling client.
     """
     instance = MagicMock()
     instance.get_health = AsyncMock(return_value=make_health())
     instance.get_apps = AsyncMock(return_value=make_apps(make_app()))
+    instance.stream = FakeStream()
+    instance.listen = AsyncMock(side_effect=instance.stream.listen)
     instance.action = AsyncMock(side_effect=AssertionError("actions go through the action client"))
     instance.press_button = AsyncMock(
         side_effect=lambda app_key, name, key: EntityCommandResponse(

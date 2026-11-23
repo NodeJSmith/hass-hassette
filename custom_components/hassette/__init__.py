@@ -11,8 +11,9 @@ from homeassistant.helpers.device_registry import ChildDeviceEntry, DeviceEntry
 from homeassistant.helpers.typing import ConfigType
 
 from .const import ACTION_TIMEOUT, DOMAIN, ISSUE_UNSUPPORTED_VERSION, SERVER_DEVICE_ID
-from .coordinator import HassetteConfigEntry, HassetteCoordinator, split_instance_identifier
+from .coordinator import HassetteConfigEntry, HassetteCoordinator, find_instance, split_instance_identifier
 from .services import async_setup_services
+from .stream import HassetteStream
 
 PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.SENSOR, Platform.SWITCH]
 
@@ -40,6 +41,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: HassetteConfigEntry) -> 
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # After the platforms, so their listeners exist before the first push.
+    HassetteStream(entry, coordinator).start()
     return True
 
 
@@ -85,7 +88,8 @@ async def async_remove_config_entry_device(
         if (instance_parts := split_instance_identifier(identifier)) is not None:
             app_key, instance_name = instance_parts
             app = apps.get(app_key)
-            if app is not None and any(i.instance_name == instance_name and i.in_current_config for i in app.instances):
+            instance = find_instance(app, instance_name) if app is not None else None
+            if instance is not None and instance.in_current_config:
                 return False
             continue
         app = apps.get(identifier)

@@ -115,9 +115,15 @@ on the next refresh.
 
 ### Updates
 
-The integration polls hassette every 30 seconds, and again right after every switch or button
-action. One failed poll is ignored; after two in a row, the app entities become unavailable until
-hassette answers again.
+The integration listens to hassette's live updates, so a value your app sets on a declared sensor
+or switch, and a change in an app's status, show up in Home Assistant within about a second. It
+also polls hassette every 30 seconds, and again right after every switch or button action. One
+failed poll is ignored; after two in a row, the app entities become unavailable until hassette
+answers again.
+
+If the live connection drops, nothing goes unavailable: values update with each poll instead, and
+the integration reconnects after the next poll that reaches hassette. A proxy in front of hassette
+has to pass WebSocket connections through for live updates to work.
 
 ### Entities your apps declare
 
@@ -127,7 +133,7 @@ instance that declares any gets its own device, named after the instance (`livin
 and instance in front, like `switch.motion_lights_living_room_occupied`. An entity id the app
 suggests is used when the entity is first created.
 
-- The entities follow what the instance declares: a new declaration adds an entity on the next poll, and
+- The entities follow what the instance declares: a new declaration adds an entity as soon as the instance starts (or on the next poll), and
   one the running instance stops declaring is removed, as is the instance's device once it declares
   nothing. Declare it again and it comes back with the entity id, name and area it had.
 - They're available only while the instance is running. A stopped or failed instance keeps its

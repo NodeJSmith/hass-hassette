@@ -296,8 +296,13 @@ that orders it, which D2's premise needs.
 
 ## Build
 
-- [ ] Implementation and tests committed
-- [ ] Docs
+- [x] Implementation and tests committed
+- [x] Docs (README "Updates" and declared-entities bullet, CLAUDE.md layout)
 - [ ] Ship-time challenge
 
 **Calls made during the build:**
+- Fetch numbers stand in for "`last_success` advanced" (D4): each refresh numbers its fetch when it starts (`fetches_started`), and a refresh whose listing was applied records its number (`last_applied_fetch`), set with `last_success` after the data is built. The connect resync passes only when a fetch started after subscribing was applied, so a poll already in flight (which may have read its listing before the subscription) can't pass for it, and two good polls in one clock tick still count as two. The restart rule (D3) compares `last_applied_fetch` the same way.
+- The stream task starts with `eager_start=False`: the connect resync fires coordinator listeners while the task runs, and an eager start runs that before `launch` has stored the task handle, so the restart listener saw no stream and started a second one.
+- An instance listed with `entities` `None` keeps the held list and its held mark, rather than having the mark raised to the listing's revision (D5): that listing carried no values for the instance, so raising the mark would reject a later push whose value the listing never delivered.
+- A failed connect resync raises `ResyncFailedError` and is logged with the client errors that end a stream (info, once per kind until the next connect); any other exception out of `listen()` is an apply bug and is logged with its traceback on every cycle, as D3 accepts.
+- A status delta for an app key `usable_app_key` rejects is dropped before its revision check, matching D4's skip filter for unknown targets.

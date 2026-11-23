@@ -2,8 +2,10 @@
 
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum, auto
 from typing import TypedDict
 
 from hassette_client import (
@@ -16,8 +18,10 @@ from hassette_client import (
 from hassette_wire import (
     API_SCHEMA_VERSION,
     AppInstance,
+    AppListResponse,
     AppSummary,
     DeclaredEntity,
+    EntityStateChangedData,
     ResourceStatus,
     SystemStatusResponse,
 )
@@ -67,10 +71,34 @@ type HassetteConfigEntry = ConfigEntry[HassetteCoordinator]
 
 @dataclass(frozen=True, slots=True)
 class HassetteData:
-    """One successful poll: the server's health and its apps keyed by app_key."""
+    """The server's health and its apps keyed by app_key, from the latest good poll and the pushes applied since.
+
+    ``entity_marks`` orders declared entity values: the newest ``entity_revision`` applied to each instance's
+    entities, keyed by ``instance_identifier``, whether it came from a listing or a push. Revisions compare only
+    within ``boot_id``, the hassette boot the listing came from.
+    """
 
     health: SystemStatusResponse
     apps: dict[str, AppSummary]
+    boot_id: str
+    entity_marks: dict[str, int]
+
+
+class PushOutcome(Enum):
+    """What applying a pushed entity value did: applied, or the reason it was skipped."""
+
+    APPLIED = auto()
+    OTHER_BOOT = auto()
+    STALE = auto()
+    UNKNOWN_TARGET = auto()
+
+
+# Why a push wasn't applied, as the debug log says it.
+PUSH_SKIP_REASONS: dict[PushOutcome, str] = {
+    PushOutcome.OTHER_BOOT: "it isn't from the held listing's hassette boot",
+    PushOutcome.STALE: "its revision isn't newer than the one held",
+    PushOutcome.UNKNOWN_TARGET: "the held listing lacks its app, instance or entity",
+}
 
 
 class AppDeviceFields(TypedDict):
@@ -122,6 +150,12 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         self.url: str = config_entry.data[CONF_URL]
         # When the last poll succeeded, which transient failures are tolerated against.
         self.last_success: datetime | None = None
+        # Each refresh numbers its fetch when it starts, and a fetch whose listing was applied records its number.
+        # The /ws stream compares them to tell that a fetch it asked for landed: a tolerated failure keeps the old
+        # data, a poll already in flight may have read its listing before the stream subscribed, and two good
+        # polls can share a timestamp.
+        self.fetches_started = 0
+        self.last_applied_fetch = 0
         # The last server version and bootstrap state seen, to act only when they change.
         self.server_version: str | None = None
         self.bootstrap_released: bool | None = None
@@ -133,12 +167,14 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         self.logged_poll_errors: set[tuple[str | None, str]] = set()
 
     async def _async_update_data(self) -> HassetteData:
+        self.fetches_started += 1
+        fetch = self.fetches_started
         try:
             health = await self.client.get_health()
             check_server_version(health)
             # Withdrawn as soon as the version passes, even if reading the apps then fails.
             ir.async_delete_issue(self.hass, DOMAIN, ISSUE_UNSUPPORTED_VERSION)
-            apps = await self.client.get_apps()
+            listing = await self.client.get_apps()
         except UnsupportedServerVersionError as exc:
             self.create_version_issue(exc)
             raise UpdateFailed(
@@ -158,20 +194,84 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
             self.log_poll_error_once(exc)
             raise poll_error(exc) from exc
 
-        self.last_success = dt_util.utcnow()
-        self.logged_poll_errors.clear()
         # Every poll, so app entities always find the hub to link under; unchanged fields write nothing.
         hub_id = self.register_server_device(health.version)
         self.track_version(health)
         self.note_bootstrap(health.bootstrap_released)
-        usable = [app for app in apps.apps if self.usable_app_key(app.app_key)]
+        usable = [app for app in listing.apps if self.usable_app_key(app.app_key)]
         self.update_app_devices(usable, hub_id)
         for app in usable:
             log_unknown_platforms(app)
         self.register_declaring_app_devices(usable, hub_id)
         if health.bootstrap_released:
             self.remove_undeclared(usable)
-        return HassetteData(health=health, apps={app.app_key: app for app in usable})
+        # After the last await, so no push can replace the data this merges with before HA assigns the result.
+        data = self.merge_listing(health, listing, usable)
+        # Only once the data is built: a step above that raises fails the poll, and must not count as good.
+        self.last_success = dt_util.utcnow()
+        self.last_applied_fetch = fetch
+        self.logged_poll_errors.clear()
+        return data
+
+    def merge_listing(
+        self, health: SystemStatusResponse, listing: AppListResponse, usable_apps: list[AppSummary]
+    ) -> HassetteData:
+        """Combine a fresh listing (``usable_apps`` is its apps with a usable key) with the held data.
+
+        Everything follows the listing except declared entity values the held data has newer, from a push
+        applied while this poll's HTTP await was pending (see ``merge_instance``). A listing from a new boot is
+        taken whole.
+        """
+        held = self.data if self.data is not None and self.data.boot_id == listing.boot_id else None
+        merged: dict[str, AppSummary] = {}
+        marks: dict[str, int] = {}
+        for app in usable_apps:
+            held_app = held.apps.get(app.app_key) if held is not None else None
+            instances: list[AppInstance] = []
+            for instance in app.instances:
+                identifier = instance_identifier(app.app_key, instance.instance_name)
+                held_instance = find_instance(held_app, instance.instance_name) if held_app is not None else None
+                held_mark = held.entity_marks.get(identifier, 0) if held is not None else 0
+                merged_instance, marks[identifier] = merge_instance(
+                    instance, held_instance, held_mark, listing.entity_revision
+                )
+                instances.append(merged_instance)
+            merged[app.app_key] = app.model_copy(update={"instances": instances})
+        return HassetteData(health=health, apps=merged, boot_id=listing.boot_id, entity_marks=marks)
+
+    def apply_entity_push(self, push: EntityStateChangedData) -> PushOutcome:
+        """Apply a pushed entity value to the held data and update the entities, unless it is skipped.
+
+        It applies only to an entity the held listing has, from the listing's boot, with a revision newer than
+        its instance's mark. ``self.data`` is replaced, not mutated, and ``async_set_updated_data`` isn't used,
+        because it would push the next poll back a full interval on every push.
+        """
+        held = self.data
+        if held is None or push.boot_id != held.boot_id:
+            return PushOutcome.OTHER_BOOT
+        identifier = instance_identifier(push.app_key, push.instance_name)
+        if (mark := held.entity_marks.get(identifier)) is not None and push.entity_revision <= mark:
+            return PushOutcome.STALE
+        app = held.apps.get(push.app_key)
+        instance = find_instance(app, push.instance_name) if app is not None else None
+        entity = push.entity
+        if app is None or instance is None or find_entity(instance.entities or [], entity.key, entity.platform) is None:
+            return PushOutcome.UNKNOWN_TARGET
+        entities = [
+            entity if (e.key, e.platform) == (entity.key, entity.platform) else e for e in instance.entities or []
+        ]
+        instances = [
+            i.model_copy(update={"entities": entities}) if i.instance_name == push.instance_name else i
+            for i in app.instances
+        ]
+        self.data = HassetteData(
+            health=held.health,
+            apps={**held.apps, app.app_key: app.model_copy(update={"instances": instances})},
+            boot_id=held.boot_id,
+            entity_marks={**held.entity_marks, identifier: push.entity_revision},
+        )
+        self.async_update_listeners()
+        return PushOutcome.APPLIED
 
     def log_poll_error_once(self, exc: HassetteClientError) -> None:
         """Warn about an unreadable response or an unexpected error once per endpoint and type until a good poll.
@@ -272,7 +372,7 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
             app_key, instance_name, key = parts
             if (instance := running.get(instance_identifier(app_key, instance_name))) is None:
                 continue
-            if not any(e.platform == entry.domain and e.key == key for e in known_declarations(instance)):
+            if find_entity(known_declarations(instance), key, entry.domain) is None:
                 _LOGGER.info("Removing %s: its hassette app instance no longer declares it", entry.entity_id)
                 entities.async_remove(entry.entity_id)
         devices = dr.async_get(self.hass)
@@ -414,6 +514,35 @@ def split_instance_identifier(identifier: str) -> tuple[str, str] | None:
     """The app key and instance name of an instance device's identifier; ``None`` for an app device's."""
     app_key, _, instance_name = identifier.partition("-")
     return (app_key, instance_name) if instance_name else None
+
+
+def find_instance(app: AppSummary, instance_name: str) -> AppInstance | None:
+    """The app's instance named ``instance_name``, or ``None`` when hassette doesn't list it."""
+    return next((instance for instance in app.instances if instance.instance_name == instance_name), None)
+
+
+def find_entity(entities: Iterable[DeclaredEntity], key: str, platform: str) -> DeclaredEntity | None:
+    """The declared entity with ``key`` on ``platform``: an entity's key is unique only within its platform."""
+    return next((entity for entity in entities if entity.key == key and entity.platform == platform), None)
+
+
+def merge_instance(
+    listed: AppInstance, held: AppInstance | None, held_mark: int, listing_revision: int
+) -> tuple[AppInstance, int]:
+    """An instance from a fresh listing merged with the held copy, and the instance's new mark.
+
+    When the held mark is newer than the listing, every entity the listing also lists keeps its held declaration,
+    value and attributes: pushes apply in revision order, so each held value is at least as new as the listing's.
+    Which entities exist, and every other field, follow the listing. An instance listed without ``entities`` keeps
+    the held list and mark, since the listing carried no values for it.
+    """
+    if held is not None and listed.entities is None:
+        return listed.model_copy(update={"entities": held.entities}), held_mark
+    mark = max(held_mark, listing_revision)
+    if held is None or held.entities is None or held_mark <= listing_revision:
+        return listed, mark
+    entities = [find_entity(held.entities, e.key, e.platform) or e for e in listed.entities or []]
+    return listed.model_copy(update={"entities": entities}), mark
 
 
 def known_declarations(instance: AppInstance) -> list[DeclaredEntity]:
