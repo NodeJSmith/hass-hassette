@@ -112,7 +112,7 @@ class HassetteDeclaredEntity(CoordinatorEntity[HassetteCoordinator]):
 
     async def run_command(self, command: Awaitable[Any], what: str) -> None:
         """Await a command for this entity, sent through the polling client: hassette answers once it is dispatched."""
-        await run_command(self.coordinator, command, what, self._attr_unique_id or self.key)
+        await run_command(self.coordinator, command, what, self.entity_id)
 
 
 def instance_device_name(instance_name: str) -> str:

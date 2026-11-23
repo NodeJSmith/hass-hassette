@@ -13,7 +13,8 @@ from .declared import HassetteDeclaredEntity, add_declared_entities
 from .entity import HassetteControlEntity, add_app_entities
 
 # No client-side limit: actions on different apps are independent, and hassette itself rejects a
-# second concurrent action on one app (action_in_progress).
+# second concurrent action on one app (action_in_progress). A declared entity's command returns as
+# soon as hassette dispatches it.
 PARALLEL_UPDATES = 0
 
 ON_STATUSES = frozenset({AppStatus.RUNNING, AppStatus.DEGRADED})

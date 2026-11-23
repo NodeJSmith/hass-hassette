@@ -398,10 +398,11 @@ def declared_unique_id(app_key: str, instance_name: str, key: str) -> str:
 
 def split_declared_unique_id(unique_id: str) -> tuple[str, str, str] | None:
     """The app key, instance name and key of a declared entity's unique_id; ``None`` for any other unique_id."""
-    parts = unique_id.split("-")
-    if len(parts) != 3:
-        return None
-    return parts[0], parts[1], parts[2]
+    match unique_id.split("-"):
+        case [app_key, instance_name, key]:
+            return app_key, instance_name, key
+        case _:
+            return None
 
 
 def instance_identifier(app_key: str, instance_name: str) -> str:

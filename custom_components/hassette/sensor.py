@@ -91,7 +91,7 @@ class HassetteDeclaredSensor(HassetteDeclaredEntity, SensorEntity):
     ) -> None:
         super().__init__(coordinator, app_key, instance, declared, parent_device_id)
         # The unparsable values and unknown classes already warned about, so each is logged once.
-        self.warned_values: set[str] = set()
+        self.warned_keys: set[str] = set()
 
     @property
     def native_value(self) -> str | int | float | date | datetime | None:
@@ -132,9 +132,9 @@ class HassetteDeclaredSensor(HassetteDeclaredEntity, SensorEntity):
 
     def warn_once(self, key: str, message: str) -> None:
         """Log a warning about this sensor's declaration the first time ``key`` is seen."""
-        if key in self.warned_values:
+        if key in self.warned_keys:
             return
-        self.warned_values.add(key)
+        self.warned_keys.add(key)
         # HA reads the classes while adding the entity, before it has an entity_id.
         _LOGGER.warning("%s: %s", self.entity_id or self.unique_id, message)
 
