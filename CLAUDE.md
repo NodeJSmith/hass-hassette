@@ -12,7 +12,7 @@ hass-hassette is the Home Assistant custom integration for [hassette](https://gi
 ## Layout
 
 - `custom_components/hassette/`: the integration. `config_flow.py` holds the config flow (user, add-on discovery, reauth and reconfigure steps), `coordinator.py` polls the hassette server, and `switch.py`, `button.py` and `sensor.py` hold the entities. `entity.py` is the base for an app's own entities and `declared.py` the base for the ones an app instance declares. `services.py` and `services.yaml` hold the `hassette.send` action.
-- `tests/`: pytest with `pytest-homeassistant-custom-component`. Coverage must stay at 95% or above (`pyproject.toml`).
+- `tests/`: pytest with `pytest-homeassistant` (HA core's test package, versioned with HA). Coverage must stay at 95% or above (`pyproject.toml`).
 - `tools/`: the repo's own lint and gate scripts.
 - `design/specs/`: design records for past changes.
 

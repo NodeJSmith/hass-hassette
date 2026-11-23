@@ -8,7 +8,7 @@ from hassette_client import HassetteConnectionError
 from homeassistant.core import Context, Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.hassette.const import DOMAIN, EVENT_MESSAGE, SERVICE_SEND
 

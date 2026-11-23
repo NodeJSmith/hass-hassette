@@ -11,9 +11,12 @@ dev = [
     "ruff>=0.14.9",
 ]
 test = [
+    # The hassio integration's own requirement, at the version its manifest pins for this HA (tests/test_manifest.py
+    # checks). pytest-homeassistant doesn't install integration libraries, and the add-on discovery code imports hassio.
+    "aiohasupervisor==0.8.1",
     "hassette-client==0.66.0",
     "pytest-cov>=7.0.0",
-    "pytest-homeassistant-custom-component==0.13.375",
+    "pytest-homeassistant==2026.11.3",
 ]
 
 [tool.uv]
@@ -22,10 +25,11 @@ default-groups = ["dev", "test"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["tools"]
+pythonpath = [".", "tools"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-addopts = "--cov=custom_components.hassette --cov-report=term-missing --cov-fail-under=95"
+# -p no:respx: pytest-homeassistant needs HA to install its httpx alias before respx is imported.
+addopts = "-p no:respx --cov=custom_components.hassette --cov-report=term-missing --cov-fail-under=95"
 
 # HSL001 AI-writing tells (divider comments, filler phrases) in comments/docstrings
 # HSL002 imports inside function/method bodies ("lazy imports")

@@ -316,3 +316,8 @@ HA's own orphan state says exactly what happened with no extra code.
 - Declared switches (and buttons) show the declaration's `attributes` too, not only sensors: hassette's `IntegrationSwitch.set(attributes=)` publishes them (ship-time challenge Finding 4, the user's choice).
 - A sensor device or state class this HA doesn't know is left out with one warning, on add and on update (`try_parse_enum`, as ESPHome does), instead of raising. This narrows D4's accepted limitation to values HA still rejects after parsing, such as a timestamp without an offset (ship-time challenge Finding 5, the user's choice after a peer check).
 - Removing a declared entity or an instance device logs at INFO, since the user sees it disappear.
+
+## Addendum
+
+- **2026-11-23:** No `pytest-homeassistant-custom-component` build for HA 2026.11 will come: the package is retired in favor of HA core's `pytest-homeassistant`, which is versioned with HA. The tests moved to it (`pytest-homeassistant==2026.11.3`, floor job `2026.11.0`), so the Build section's floor-pin blocker is resolved that way. It doesn't install integration libraries, so the test group and the floor job add `aiohasupervisor` at the version hassio's manifest pins.
+- **2026-11-23:** Declared entities drop app attributes whose names Home Assistant sets itself (`HA_OWNED_ATTRIBUTES` in `declared.py`, plus a sensor's `state_class`, `options` and `last_reset`), with one warning per name. This fixes what was known issue KI-003, so that entry is gone from `known-issues.md`.
