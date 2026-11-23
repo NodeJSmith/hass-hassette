@@ -13,11 +13,19 @@ from hassette_client import (
     UnsupportedServerVersionError,
     check_server_version,
 )
-from hassette_wire import API_SCHEMA_VERSION, AppSummary, SystemStatusResponse
+from hassette_wire import (
+    API_SCHEMA_VERSION,
+    AppInstance,
+    AppSummary,
+    DeclaredEntity,
+    ResourceStatus,
+    SystemStatusResponse,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_URL
+from homeassistant.const import CONF_URL, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.device_registry import DeviceEntryType
@@ -51,6 +59,9 @@ _LOGGER = logging.getLogger(__name__)
 # the "-server" hub identifier rely on "-" being outside it, so an app whose key isn't in it gets no entities.
 APP_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_.]{0,127}")
 
+# The platforms an app instance can declare entities on. A declaration on any other platform is skipped.
+DECLARED_PLATFORMS = frozenset({Platform.BUTTON, Platform.SENSOR, Platform.SWITCH})
+
 type HassetteConfigEntry = ConfigEntry[HassetteCoordinator]
 
 
@@ -68,6 +79,16 @@ class AppDeviceFields(TypedDict):
     name: str
     model: str
     model_id: str | None
+
+
+class AppDeviceSpec(AppDeviceFields):
+    """Every field of an app device, keyed by the names ``DeviceInfo`` and ``async_get_or_create`` share."""
+
+    identifiers: set[tuple[str, str]]
+    manufacturer: str
+    via_device_id: str
+    configuration_url: str
+    entry_type: DeviceEntryType
 
 
 class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
@@ -145,6 +166,11 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         self.note_bootstrap(health.bootstrap_released)
         usable = [app for app in apps.apps if self.usable_app_key(app.app_key)]
         self.update_app_devices(usable, hub_id)
+        for app in usable:
+            log_unknown_platforms(app)
+        self.register_declaring_app_devices(usable, hub_id)
+        if health.bootstrap_released:
+            self.remove_undeclared(usable)
         return HassetteData(health=health, apps={app.app_key: app for app in usable})
 
     def log_poll_error_once(self, exc: HassetteClientError) -> None:
@@ -208,6 +234,55 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
                 continue
             # The registry writes, and fires an update event, only when a value differs.
             devices.async_update_device(device.id, **app_device_fields(app), via_device_id=hub_id)
+
+    def register_declaring_app_devices(self, apps: list[AppSummary], hub_id: str) -> None:
+        """Create the app device of each app with a declared entity that may be added, before any platform adds one.
+
+        A declared entity's instance device is a child of its app device, and Home Assistant refuses a child
+        whose parent isn't registered yet. The platforms set up concurrently, so the coordinator registers the
+        parent here, in the poll, rather than leaving it to whichever v0.1 entity happens to be added first.
+        """
+        devices = dr.async_get(self.hass)
+        registry = er.async_get(self.hass)
+        for app in apps:
+            if any(may_add_declared(registry, app.app_key, instance, entity) for instance, entity in declarations(app)):
+                devices.async_get_or_create(
+                    config_entry_id=self.config_entry.entry_id, **app_device_spec(app, self.url, hub_id)
+                )
+
+    def remove_undeclared(self, apps: list[AppSummary]) -> None:
+        """Remove the entities a running instance no longer declares, and the device of one that declares none.
+
+        Only a running instance is compared: hassette serves a stopped or failed instance's last declarations,
+        and an instance with no ``entities`` was listed without them. Called only for a listing taken after
+        app startup was released, which is complete. One listing is enough: a running instance's declarations
+        change only when it reinitializes, and Home Assistant restores a removed entity's id, name, area and
+        disabled state when its unique_id comes back.
+        """
+        running = {
+            instance_identifier(app.app_key, instance.instance_name): instance
+            for app in apps
+            for instance in app.instances
+            if instance.status == ResourceStatus.RUNNING and instance.entities is not None
+        }
+        entities = er.async_get(self.hass)
+        for entry in er.async_entries_for_config_entry(entities, self.config_entry.entry_id):
+            if (parts := split_declared_unique_id(entry.unique_id)) is None:
+                continue
+            app_key, instance_name, key = parts
+            if (instance := running.get(instance_identifier(app_key, instance_name))) is None:
+                continue
+            if not any(e.platform == entry.domain and e.key == key for e in known_declarations(instance)):
+                _LOGGER.info("Removing %s: its hassette app instance no longer declares it", entry.entity_id)
+                entities.async_remove(entry.entity_id)
+        devices = dr.async_get(self.hass)
+        for identifier, instance in running.items():
+            if known_declarations(instance):
+                continue
+            device = devices.async_get_child_device_by_identifier((DOMAIN, identifier), self.config_entry.entry_id)
+            if device is not None:
+                _LOGGER.info("Removing the device of %s: it no longer declares any entities", identifier)
+                devices.async_remove_device(device.id)
 
     @property
     def app_list_trusted(self) -> bool:
@@ -296,3 +371,85 @@ def app_device_fields(app: AppSummary) -> AppDeviceFields:
     else:
         model, model_id = app.class_name, None
     return AppDeviceFields(name=app.display_name, model=model, model_id=model_id)
+
+
+def app_device_spec(app: AppSummary, url: str, hub_id: str) -> AppDeviceSpec:
+    """Every field an app's device is created with, by its first v0.1 entity or by the coordinator."""
+    return AppDeviceSpec(
+        identifiers={(DOMAIN, app.app_key)},
+        # The coordinator keeps these fields in step with hassette (update_app_devices).
+        **app_device_fields(app),
+        manufacturer=MANUFACTURER,
+        configuration_url=f"{url}/apps/{app.app_key}",
+        via_device_id=hub_id,
+        entry_type=DeviceEntryType.SERVICE,
+    )
+
+
+def declared_unique_id(app_key: str, instance_name: str, key: str) -> str:
+    """The unique_id of a declared entity.
+
+    None of the parts can contain ``-``: app keys are in ``APP_KEY_PATTERN``, and hassette restricts instance names
+    and entity keys to lowercase letters, digits and ``_``. So it splits back apart, and can't collide with a v0.1
+    ``{app_key}-{key}`` unique_id.
+    """
+    return f"{app_key}-{instance_name}-{key}"
+
+
+def split_declared_unique_id(unique_id: str) -> tuple[str, str, str] | None:
+    """The app key, instance name and key of a declared entity's unique_id; ``None`` for any other unique_id."""
+    match unique_id.split("-"):
+        case [app_key, instance_name, key]:
+            return app_key, instance_name, key
+        case _:
+            return None
+
+
+def instance_identifier(app_key: str, instance_name: str) -> str:
+    """The device identifier of an app instance that declares entities (``-`` is in neither part)."""
+    return f"{app_key}-{instance_name}"
+
+
+def split_instance_identifier(identifier: str) -> tuple[str, str] | None:
+    """The app key and instance name of an instance device's identifier; ``None`` for an app device's."""
+    app_key, _, instance_name = identifier.partition("-")
+    return (app_key, instance_name) if instance_name else None
+
+
+def known_declarations(instance: AppInstance) -> list[DeclaredEntity]:
+    """The instance's declared entities on platforms this integration has."""
+    return [entity for entity in instance.entities or [] if entity.platform in DECLARED_PLATFORMS]
+
+
+def log_unknown_platforms(app: AppSummary) -> None:
+    """Log each declared entity on a platform this integration doesn't have; it is skipped."""
+    for instance in app.instances:
+        for entity in instance.entities or []:
+            if entity.platform not in DECLARED_PLATFORMS:
+                _LOGGER.debug(
+                    "Skipping %s on %s/%s: this integration has no %s platform",
+                    entity.key,
+                    app.app_key,
+                    instance.instance_name,
+                    entity.platform,
+                )
+
+
+def declarations(app: AppSummary) -> list[tuple[AppInstance, DeclaredEntity]]:
+    """Every declared entity on a known platform across the app's instances, with its instance.
+
+    An instance listed without ``entities`` (``None``) is skipped: that means "not included", not "none".
+    """
+    return [(instance, entity) for instance in app.instances for entity in known_declarations(instance)]
+
+
+def may_add_declared(registry: er.EntityRegistry, app_key: str, instance: AppInstance, entity: DeclaredEntity) -> bool:
+    """Whether a declared entity may be added: its instance is in hassette's config, or it is already registered.
+
+    The coordinator registers app devices by this rule and the platforms add entities by it (narrowed by what
+    they added this session), so every entity a platform adds has an app device to be a child of.
+    """
+    if instance.in_current_config:
+        return True
+    unique_id = declared_unique_id(app_key, instance.instance_name, entity.key)
+    return registry.async_get_entity_id(entity.platform, DOMAIN, unique_id) is not None

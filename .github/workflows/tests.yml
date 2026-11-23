@@ -36,12 +36,12 @@ jobs:
 
     floor:
         # The oldest HA hacs.json claims. Raise this pin, and hacs.json's "homeassistant", only in the
-        # change that starts using a newer HA API: pytest-homeassistant-custom-component 0.13.363 is HA 2026.9.0.
+        # change that starts using a newer HA API. pytest-homeassistant's version is the HA release it installs.
         name: Tests (HA floor)
         runs-on: ubuntu-latest
         timeout-minutes: 15
         env:
-            FLOOR_PHCC: "0.13.363"
+            FLOOR_PYTEST_HA: "2026.11.0"
         steps:
             - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
               with:
@@ -56,7 +56,10 @@ jobs:
               run: |
                   requirement=$(python3 -c 'import json; print(json.load(open("custom_components/hassette/manifest.json"))["requirements"][0])')
                   uv venv
-                  uv pip install "pytest-homeassistant-custom-component==${FLOOR_PHCC}" "$requirement" pytest-cov
+                  uv pip install "pytest-homeassistant==${FLOOR_PYTEST_HA}" "$requirement" pytest-cov
+                  # pytest-homeassistant doesn't install integration libraries; add hassio's, as this HA pins it.
+                  uv run --no-sync python -c 'import json, pathlib, homeassistant; print("\n".join(json.loads((pathlib.Path(homeassistant.__file__).parent / "components/hassio/manifest.json").read_text())["requirements"]))' > hassio-requirements.txt
+                  uv pip install -r hassio-requirements.txt
 
             - name: Check the floor matches hacs.json
               run: |

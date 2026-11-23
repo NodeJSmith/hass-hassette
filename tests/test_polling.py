@@ -23,7 +23,7 @@ from homeassistant.const import STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.hassette.const import (
     DOMAIN,
@@ -124,12 +124,12 @@ async def test_downgrade_while_running_raises_repair(
 async def test_server_upgrade_updates_hub_version(
     hass: HomeAssistant, client: MagicMock, loaded_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
 ) -> None:
-    client.get_health.return_value = make_health(version="0.66.0", api_schema_version=7)
+    client.get_health.return_value = make_health(version="0.67.0", api_schema_version=8)
     await poll(hass, freezer)
 
     hub = dr.async_get(hass).async_get_device_by_identifier((DOMAIN, SERVER_DEVICE_ID), ENTRY_ID)
     assert hub is not None
-    assert hub.sw_version == "0.66.0"
+    assert hub.sw_version == "0.67.0"
     # A newer schema keeps working.
     assert hass.states.get(SWITCH).state == STATE_ON
 

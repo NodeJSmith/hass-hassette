@@ -3,7 +3,7 @@
   "description": [
     "Per-repo Renovate config, processed by the maintainer's self-hosted runner.",
     "hassette-client is pinned twice: in manifest.json (what HA installs) and in the test dependency group (what CI tests). One grouped PR bumps both; tests/test_manifest.py fails if they drift.",
-    "The HA-floor CI job pins its own pytest-homeassistant-custom-component in tests.yml, outside Renovate's reach on purpose: the floor moves only when the code needs a newer HA, together with hacs.json.",
+    "The HA-floor CI job pins its own pytest-homeassistant in tests.yml, outside Renovate's reach on purpose: the floor moves only when the code needs a newer HA, together with hacs.json.",
     "Non-major updates automerge through GitHub auto-merge once the required checks pass, after minimumReleaseAge holds each release for 3 days (timestamp-optional, so Action digests without a release timestamp aren't held forever). Major updates also automerge for dev tooling only (dependency-groups, GitHub Actions): if one breaks, CI fails and the autofix reviewer picks it up. Majors of runtime dependencies (hassette-client in manifest.json) never automerge.",
     "customManagers tracks each GitHub-hosted hook repo's rev in prek.toml against its tags: Renovate's built-in pre-commit manager only reads .pre-commit-config.yaml, so prek.toml pins would otherwise go stale silently."
   ],

@@ -1,7 +1,8 @@
 """Base entities for a hassette app, and how the platforms add them as apps appear."""
 
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
+from typing import Any
 
 from hassette_client import HassetteClientError
 from hassette_wire import AppAction, AppStatus, AppSummary
@@ -9,12 +10,12 @@ from homeassistant.const import Platform
 from homeassistant.core import callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity, EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, MANUFACTURER, SERVER_DEVICE_ID
-from .coordinator import HassetteConfigEntry, HassetteCoordinator, app_device_fields
+from .const import DOMAIN, SERVER_DEVICE_ID
+from .coordinator import HassetteConfigEntry, HassetteCoordinator, app_device_spec
 from .errors import action_error, is_completed_action
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,18 +38,11 @@ class HassetteAppEntity(CoordinatorEntity[HassetteCoordinator]):
         self.entity_description = description
         self.app_key = app.app_key
         self._attr_unique_id = app_unique_id(app.app_key, description)
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, app.app_key)},
-            # The coordinator keeps these fields in step with hassette (update_app_devices).
-            **app_device_fields(app),
-            manufacturer=MANUFACTURER,
-            # Every successful poll registers the hub device, and entities are only built after one.
-            via_device_id=dr.async_get_device_id_by_identifier(
-                coordinator.hass, (DOMAIN, SERVER_DEVICE_ID), config_entry_id=coordinator.config_entry.entry_id
-            ),
-            configuration_url=f"{coordinator.url}/apps/{app.app_key}",
-            entry_type=DeviceEntryType.SERVICE,
+        # Every successful poll registers the hub device, and entities are only built after one.
+        hub_id = dr.async_get_device_id_by_identifier(
+            coordinator.hass, (DOMAIN, SERVER_DEVICE_ID), config_entry_id=coordinator.config_entry.entry_id
         )
+        self._attr_device_info = DeviceInfo(**app_device_spec(app, coordinator.url, hub_id))
 
     @property
     def app(self) -> AppSummary | None:
@@ -70,15 +64,25 @@ class HassetteControlEntity(HassetteAppEntity):
         return super().available and app is not None and app.status in CONTROLLABLE_STATUSES
 
     async def run_action(self, action: AppAction) -> None:
-        """Send ``action`` for this app, then refresh whatever the outcome, since a failure may still have acted."""
-        try:
-            await self.coordinator.action_client.action(self.app_key, action)
-        except HassetteClientError as exc:
-            if not is_completed_action(exc):
-                raise action_error(exc) from exc
-            _LOGGER.warning("hassette ran %s on %s but its response was unreadable: %s", action, self.app_key, exc)
-        finally:
-            await self.coordinator.async_request_refresh()
+        """Send ``action`` for this app."""
+        await run_command(
+            self.coordinator, self.coordinator.action_client.action(self.app_key, action), action, self.app_key
+        )
+
+
+async def run_command(coordinator: HassetteCoordinator, command: Awaitable[Any], what: str, target: str) -> None:
+    """Await a command to hassette, then refresh whatever the outcome, since a failure may still have acted.
+
+    ``what`` and ``target`` name the command and what it acted on, for the log.
+    """
+    try:
+        await command
+    except HassetteClientError as exc:
+        if not is_completed_action(exc):
+            raise action_error(exc) from exc
+        _LOGGER.warning("hassette ran %s on %s but its response was unreadable: %s", what, target, exc)
+    finally:
+        await coordinator.async_request_refresh()
 
 
 def app_unique_id(app_key: str, description: EntityDescription) -> str:

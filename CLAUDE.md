@@ -7,12 +7,12 @@ peers: Node-RED Companion (hass-node-red), NetDaemon integration, AppDaemon, pys
 
 # CLAUDE.md
 
-hass-hassette is the Home Assistant custom integration for [hassette](https://github.com/NodeJSmith/hassette). It connects Home Assistant to one hassette server and gives each hassette app a device with a switch, a reload button and a status sensor. `README.md` describes it from a user's side.
+hass-hassette is the Home Assistant custom integration for [hassette](https://github.com/NodeJSmith/hassette). It connects Home Assistant to one hassette server and gives each hassette app a device with a switch, a reload button and a status sensor, plus a device per app instance for the buttons, switches and sensors the instance declares. `README.md` describes it from a user's side.
 
 ## Layout
 
-- `custom_components/hassette/`: the integration. `config_flow.py` holds the config flow (user, add-on discovery, reauth and reconfigure steps), `coordinator.py` polls the hassette server, and `switch.py`, `button.py` and `sensor.py` hold the entities. `services.py` and `services.yaml` hold the `hassette.send` action.
-- `tests/`: pytest with `pytest-homeassistant-custom-component`. Coverage must stay at 95% or above (`pyproject.toml`).
+- `custom_components/hassette/`: the integration. `config_flow.py` holds the config flow (user, add-on discovery, reauth and reconfigure steps), `coordinator.py` polls the hassette server, and `switch.py`, `button.py` and `sensor.py` hold the entities. `entity.py` is the base for an app's own entities and `declared.py` the base for the ones an app instance declares. `services.py` and `services.yaml` hold the `hassette.send` action.
+- `tests/`: pytest with `pytest-homeassistant` (HA core's test package, versioned with HA). Coverage must stay at 95% or above (`pyproject.toml`).
 - `tools/`: the repo's own lint and gate scripts.
 - `design/specs/`: design records for past changes.
 

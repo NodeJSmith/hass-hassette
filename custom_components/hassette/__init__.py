@@ -7,11 +7,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.helpers.device_registry import ChildDeviceEntry, DeviceEntry
 from homeassistant.helpers.typing import ConfigType
 
 from .const import ACTION_TIMEOUT, DOMAIN, ISSUE_UNSUPPORTED_VERSION, SERVER_DEVICE_ID
-from .coordinator import HassetteConfigEntry, HassetteCoordinator
+from .coordinator import HassetteConfigEntry, HassetteCoordinator, split_instance_identifier
 from .services import async_setup_services
 
 PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.SENSOR, Platform.SWITCH]
@@ -62,9 +62,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: HassetteConfigEntry) ->
 async def async_remove_config_entry_device(
     hass: HomeAssistant,
     entry: HassetteConfigEntry,
-    device: DeviceEntry,
+    device: DeviceEntry | ChildDeviceEntry,
 ) -> bool:
-    """Allow deleting an app's device only once hassette no longer has the app in its config.
+    """Allow deleting an app's or app instance's device only once hassette no longer has it in its config.
 
     The hub device is never removable. A device with no hassette identifier isn't this integration's to keep.
     Nothing is removable unless the entry holds a good app list (from the latest poll, or one a single
@@ -82,6 +82,12 @@ async def async_remove_config_entry_device(
             continue
         if identifier == SERVER_DEVICE_ID:
             return False
+        if (instance_parts := split_instance_identifier(identifier)) is not None:
+            app_key, instance_name = instance_parts
+            app = apps.get(app_key)
+            if app is not None and any(i.instance_name == instance_name and i.in_current_config for i in app.instances):
+                return False
+            continue
         app = apps.get(identifier)
         if app is not None and app.in_current_config:
             return False

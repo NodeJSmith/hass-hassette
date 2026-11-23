@@ -41,7 +41,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
+from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.hassette.const import ACTION_REFRESH_COOLDOWN, MAX_DETAIL_LENGTH, SCAN_INTERVAL
 
@@ -98,7 +98,12 @@ async def test_entity_identity(hass: HomeAssistant, loaded_entry: MockConfigEntr
 
 @pytest.mark.parametrize(
     ("status", "switch_state"),
-    [("running", STATE_ON), ("degraded", STATE_ON), ("stopped", STATE_OFF), ("failed", STATE_OFF)],
+    [
+        ("running", STATE_ON),
+        ("degraded", STATE_ON),
+        ("stopped", STATE_OFF),
+        ("failed", STATE_OFF),
+    ],
 )
 async def test_controllable_statuses(
     hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, status: str, switch_state: str
@@ -111,7 +116,14 @@ async def test_controllable_statuses(
 
 
 @pytest.mark.parametrize(
-    ("status", "sensor_state"), [("disabled", "disabled"), ("blocked", "blocked"), ("paused", "unknown")]
+    ("status", "sensor_state"),
+    [
+        ("disabled", "disabled"),
+        ("blocked", "blocked"),
+        ("starting", "starting"),
+        ("stopping", "stopping"),
+        ("paused", "unknown"),
+    ],
 )
 async def test_uncontrollable_statuses(
     hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, status: str, sensor_state: str

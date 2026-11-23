@@ -14,7 +14,9 @@
           "disabled": "mdi:cancel",
           "failed": "mdi:alert-circle",
           "running": "mdi:play-circle",
+          "starting": "mdi:play-circle-outline",
           "stopped": "mdi:stop-circle",
+          "stopping": "mdi:stop-circle-outline",
           "unknown": "mdi:help-circle"
         }
       }
