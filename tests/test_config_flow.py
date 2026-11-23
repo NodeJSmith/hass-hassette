@@ -152,7 +152,7 @@ async def test_too_old_server_aborts(hass: HomeAssistant, client: MagicMock) -> 
     assert result["description_placeholders"] == {
         "server_version": "0.40.0",
         "api_schema_version": "0",
-        "min_api_schema_version": "6",
+        "min_api_schema_version": "7",
     }
 
 

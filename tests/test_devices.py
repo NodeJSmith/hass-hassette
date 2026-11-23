@@ -21,7 +21,7 @@ from custom_components.hassette.const import (
     SERVER_DEVICE_ID,
 )
 
-from .conftest import ENTRY_ID, SWITCH, http_error, make_app, make_apps, make_health, poll
+from .conftest import ENTRY_ID, SWITCH, delete_device_and_poll, http_error, make_app, make_apps, make_health, poll
 
 
 async def test_missing_hub_is_registered_again(
@@ -235,11 +235,8 @@ async def test_deleted_device_of_departed_app_stays_deleted(
     await poll(hass, freezer)
     device = devices.async_get_device_by_identifier((DOMAIN, "motion_lights"), ENTRY_ID)
     assert device is not None
-    devices.async_remove_device(device.id)
-    await hass.async_block_till_done()
-
     # hassette keeps listing the app from its history.
-    await poll(hass, freezer)
+    await delete_device_and_poll(hass, freezer, device.id)
 
     assert devices.async_get_device_by_identifier((DOMAIN, "motion_lights"), ENTRY_ID) is None
     assert hass.states.get(SWITCH) is None

@@ -75,7 +75,9 @@
           "disabled": "Disabled",
           "failed": "Failed",
           "running": "Running",
+          "starting": "Starting",
           "stopped": "Stopped",
+          "stopping": "Stopping",
           "unknown": "Unknown"
         },
         "state_attributes": {
@@ -95,6 +97,12 @@
     },
     "action_in_progress": {
       "message": "Another action on this app is still running. Try again when it finishes."
+    },
+    "instance_not_running": {
+      "message": "This app instance isn't running, so it can't take the command. Try again once it is running."
+    },
+    "entity_not_declared": {
+      "message": "This app instance no longer declares this entity."
     },
     "send_disconnected": {
       "message": "hassette isn't connected to Home Assistant, so the message wasn't delivered. Try again when it reconnects."
@@ -131,6 +139,9 @@
     },
     "not_found": {
       "message": "hassette doesn't have this app in its config."
+    },
+    "instance_not_found": {
+      "message": "hassette doesn't have this app instance in its config."
     },
     "poll_unexpected_response": {
       "message": "Something other than hassette answered the poll. Check that the proxy in front of hassette lets Home Assistant reach /api/."

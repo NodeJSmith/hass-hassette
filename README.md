@@ -15,9 +15,9 @@ hassette's web UI. Each app device's **Visit** link opens that app's page in has
 
 ## Requirements
 
-- Home Assistant 2026.9.0 or newer
+- Home Assistant 2026.11.0 or newer
 - Home Assistant's built-in **Marketplace** (2026.11 and newer), or [HACS](https://hacs.xyz) on earlier versions
-- A hassette server that Home Assistant can reach over HTTP. hassette 0.64 or newer: an older hassette
+- A hassette server that Home Assistant can reach over HTTP. hassette 0.66 or newer: an older hassette
   serves an API this integration can't use, and Home Assistant raises a repair telling you to upgrade.
 
 ## Install
@@ -90,6 +90,8 @@ device and its entities are tied to the app's key in hassette's config (`app_key
 | State | Meaning |
 |---|---|
 | `running` | Every instance of the app is running. |
+| `starting` | An instance of the app is starting. |
+| `stopping` | An instance of the app is stopping. |
 | `degraded` | Some instances run and at least one has failed. |
 | `failed` | Every instance has failed. The `error_message` attribute holds the error. |
 | `stopped` | The app isn't running: never started, or stopped. |
@@ -104,8 +106,8 @@ Assistant's history.
 ### Switch and button
 
 The switch is on for `running` and `degraded`, and off for `stopped` and `failed`. The switch and the
-reload button are unavailable while the app is `disabled`, `blocked` or `unknown`, since hassette
-can't start them from here.
+reload button are unavailable while the app is `disabled`, `blocked` or `unknown`, since hassette can't
+start them from here, and while it is `starting` or `stopping`.
 
 A start or reload waits for the app to finish initializing, up to 45 seconds. If hassette doesn't
 answer in time, Home Assistant reports that the outcome is unknown, and the app's real state shows up
@@ -116,6 +118,23 @@ on the next refresh.
 The integration polls hassette every 30 seconds, and again right after every switch or button
 action. One failed poll is ignored; after two in a row, the app entities become unavailable until
 hassette answers again.
+
+### Entities your apps declare
+
+An app can declare its own buttons, switches and sensors with hassette's `self.integration`. Each app
+instance that declares any gets its own device, named after the instance (`living_room` shows as
+"Living room") and nested under the app's device, so Home Assistant names its entities with the app
+and instance in front, like `switch.motion_lights_living_room_occupied`. An entity id the app
+suggests is used when the entity is first created.
+
+- The entities follow what the instance declares: a new declaration adds an entity on the next poll, and
+  one the running instance stops declaring is removed, as is the instance's device once it declares
+  nothing. Declare it again and it comes back with the entity id, name and area it had.
+- They're available only while the instance is running. A stopped or failed instance keeps its
+  entities, unavailable.
+- A switch shows the state the app set. Turning it on or off asks the app to change it.
+- When an instance leaves hassette's config, its device can be deleted the same way as a removed app's.
+  If hassette stops listing the instance at all, Home Assistant shows its entities as no longer provided.
 
 ## Actions
 

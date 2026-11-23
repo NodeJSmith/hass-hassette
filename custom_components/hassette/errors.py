@@ -16,11 +16,14 @@ from hassette_client import (
     AppNotFoundError,
     AuthenticationError,
     BootstrapNotReleasedError,
+    EntityNotDeclaredError,
     ForbiddenError,
     GatewayError,
     HassetteClientError,
     HassetteConnectionError,
     HassetteTimeoutError,
+    InstanceNotFoundError,
+    InstanceNotRunningError,
     InvalidAppKeyError,
     NeedsRestartError,
     RedirectError,
@@ -90,6 +93,8 @@ ACTION_ERRORS: tuple[ErrorRow, ...] = (
     (AuthenticationError, "invalid_auth"),
     (BootstrapNotReleasedError, "not_bootstrapped"),
     (ActionInProgressError, "action_in_progress"),
+    (InstanceNotRunningError, "instance_not_running"),
+    (EntityNotDeclaredError, "entity_not_declared"),
     (NeedsRestartError, "needs_restart"),
     (ActionFailedError, "action_failed"),
     # A proxy's 502/503/504 or a timeout: the action may still have run.
@@ -104,9 +109,10 @@ ACTION_ERRORS: tuple[ErrorRow, ...] = (
     (ResponseValidationError, "invalid_response"),
 )
 
-# Caller faults: the app doesn't exist, or the server is configured to exclude it.
+# Caller faults: the app or instance doesn't exist, or the server is configured to exclude it.
 ACTION_VALIDATION_ERRORS: tuple[ErrorRow, ...] = (
     (AppNotFoundError, "not_found"),
+    (InstanceNotFoundError, "instance_not_found"),
     (InvalidAppKeyError, "not_found"),
     (AppBlockedError, "blocked_by_filter"),
 )

@@ -300,8 +300,16 @@ HA's own orphan state says exactly what happened with no extra code.
 
 ## Build
 
-- [ ] Implementation and tests committed
-- [ ] Docs
+- [x] Implementation and tests committed
+- [x] Docs
 - [ ] Ship-time challenge
 
 **Calls made during the build:**
+- The `pytest-homeassistant-custom-component` pin stays at 0.13.375 (HA 2026.10.4), and CI's `FLOOR_PHCC` stays at 0.13.363: no build for HA 2026.11 exists yet. The device-info code builds `ChildDeviceInfo` with keyword arguments, which give the same result from 2026.10.4's `TypedDict` and 2026.11's dataclass. `hacs.json` already says 2026.11.0, so the floor job fails until both pins move to a 2026.11 build, as does `uv.lock` until hassette-client 0.66.0 is on PyPI. Both are merge blockers; the user approved this plan at the start of the build.
+- Instance devices are HA child devices, which the device registry indexes apart from main devices: the diff and the tests find them with `async_get_child_device_by_identifier`, and `async_remove_config_entry_device` takes a `ChildDeviceEntry` too.
+- The add listener skips an app with no device (`async_get_device_by_identifier`, not `async_get_device_id_by_identifier`, which raises). hassette lists departed apps that may have no device; such an app has nothing the add rule admits.
+- A declared entity is also unavailable once its declaration is gone from the listing: its value, name and sensor fields come from the declaration.
+- `InstanceNotFoundError` maps to its own `instance_not_found` validation message rather than reusing `not_found`'s app wording; it is still a `ServiceValidationError`, as parent D5 says.
+- hassette-client 0.66 adds `starting` and `stopping` app statuses. The v0.1 status sensor already lists every status, so they get translations, icons and README rows. `CONTROLLABLE_STATUSES` is unchanged, so the v0.1 switch and reload button stay unavailable during them, as for any status they don't list.
+- The app device's full fields moved into one `app_device_spec` in `coordinator.py`, used by the v0.1 entity and by the coordinator's registration, and v0.1's `run_action` and the declared commands share `run_command` in `entity.py`.
+- Unknown-platform declarations are logged at debug on each poll by the coordinator, not by the three platform listeners.
