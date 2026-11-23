@@ -273,7 +273,7 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
             if (instance := running.get(instance_identifier(app_key, instance_name))) is None:
                 continue
             if not any(e.platform == entry.domain and e.key == key for e in known_declarations(instance)):
-                _LOGGER.debug("Removing %s: its hassette app instance no longer declares it", entry.entity_id)
+                _LOGGER.info("Removing %s: its hassette app instance no longer declares it", entry.entity_id)
                 entities.async_remove(entry.entity_id)
         devices = dr.async_get(self.hass)
         for identifier, instance in running.items():
@@ -281,7 +281,7 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
                 continue
             device = devices.async_get_child_device_by_identifier((DOMAIN, identifier), self.config_entry.entry_id)
             if device is not None:
-                _LOGGER.debug("Removing the device of %s: it no longer declares any entities", identifier)
+                _LOGGER.info("Removing the device of %s: it no longer declares any entities", identifier)
                 devices.async_remove_device(device.id)
 
     @property

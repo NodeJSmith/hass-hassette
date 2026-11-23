@@ -95,6 +95,12 @@ class HassetteDeclaredEntity(CoordinatorEntity[HassetteCoordinator]):
         return self.declared_name if declared is None else declared.name
 
     @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """The attributes the app last set with the value."""
+        declared = self.declared
+        return None if declared is None else declared.attributes or None
+
+    @property
     def available(self) -> bool:
         instance = self.instance
         return (

@@ -3,11 +3,16 @@
 import logging
 from datetime import UTC, date, datetime
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
-from hassette_client import EntityNotDeclaredError, InstanceNotFoundError, InstanceNotRunningError
+from hassette_client import (
+    EntityNotDeclaredError,
+    HassetteConnectionError,
+    InstanceNotFoundError,
+    InstanceNotRunningError,
+)
 from hassette_wire import AppSummary, DeclaredEntity
 from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
 from homeassistant.components.button import SERVICE_PRESS
@@ -24,6 +29,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -241,6 +247,18 @@ async def test_switch_shows_the_declared_value(
     await load_with(hass, client, config_entry, declaring(make_declared("occupied", value=value)))
 
     assert state(hass, OCCUPIED) == expected
+
+
+async def test_switch_shows_the_attributes_the_app_set(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry
+) -> None:
+    await load_with(
+        hass, client, config_entry, declaring(make_declared("occupied", value=True, attributes={"who": "Ann"}))
+    )
+
+    current = hass.states.get(OCCUPIED)
+    assert current is not None
+    assert current.attributes["who"] == "Ann"
 
 
 @pytest.mark.parametrize(("service", "on"), [(SERVICE_TURN_ON, True), (SERVICE_TURN_OFF, False)])
@@ -569,3 +587,111 @@ async def test_deleting_a_departed_apps_device_doesnt_block_declared_entities(
     await delete_device_and_poll(hass, freezer, old.id)
 
     assert state(hass, "button.motion_lights_living_room_ring") is not None
+
+
+async def test_tolerated_failure_removes_nothing(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    """A poll that keeps the previous listing after a transient failure has no new listing to diff."""
+    await load_with(hass, client, config_entry, declaring(*THREE))
+
+    client.get_apps.side_effect = HassetteConnectionError("refused")
+    with patch.object(config_entry.runtime_data, "remove_undeclared") as remove:
+        await poll(hass, freezer)
+
+    remove.assert_not_called()
+
+    registry = er.async_get(hass)
+    assert all(registry.async_get(entity_id) is not None for entity_id in (OCCUPIED, PING, LUX))
+    assert state(hass, PING) is not None
+
+
+async def test_redeclared_key_keeps_the_users_name_area_and_disabled_state(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    """One-poll removal is safe because Home Assistant restores these when the unique_id returns."""
+    await load_with(hass, client, config_entry, declaring(*THREE))
+    area = ar.async_get(hass).async_create("Hall")
+    er.async_get(hass).async_update_entity(
+        PING, name="Doorbell", area_id=area.id, disabled_by=er.RegistryEntryDisabler.USER
+    )
+
+    await relist(hass, client, freezer, declaring(THREE[0]))
+    await relist(hass, client, freezer, declaring(*THREE))
+
+    entry = er.async_get(hass).async_get(PING)
+    assert entry is not None
+    assert (entry.name, entry.area_id, entry.disabled_by) == ("Doorbell", area.id, er.RegistryEntryDisabler.USER)
+
+
+async def test_users_instance_device_name_survives_polls(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    await load_with(hass, client, config_entry, declaring(*THREE))
+    device = instance_device(hass)
+    assert device is not None
+    dr.async_get(hass).async_update_child_device(device.id, name_by_user="Lounge")
+
+    await relist(hass, client, freezer, declaring(*THREE, make_declared("ring", "button")))
+
+    device = instance_device(hass)
+    assert device is not None
+    assert (device.name, device.name_by_user) == ("Living room", "Lounge")
+
+
+async def test_instance_device_not_removable_before_bootstrap_release(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    await load_with(hass, client, config_entry, declaring(*THREE))
+    device = instance_device(hass)
+    assert device is not None
+
+    client.get_health.return_value = make_health(bootstrap_released=False)
+    await relist(hass, client, freezer, declaring(*THREE, in_current_config=False))
+
+    assert await async_remove_config_entry_device(hass, config_entry, device) is False
+
+
+async def test_instance_declaring_only_unknown_platforms_loses_its_device(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    await load_with(hass, client, config_entry, declaring(*THREE))
+
+    await relist(hass, client, freezer, declaring(make_declared("dial", "number")))
+
+    assert instance_device(hass) is None
+    assert state(hass, "switch.motion_lights") == STATE_ON
+
+
+@pytest.mark.parametrize(("field", "attribute"), [("device_class", "device_class"), ("state_class", "state_class")])
+async def test_unknown_sensor_class_is_left_out_with_one_warning(
+    hass: HomeAssistant,
+    client: MagicMock,
+    config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+    field: str,
+    attribute: str,
+) -> None:
+    """Like ESPHome, a class this Home Assistant lacks is dropped; the sensor is added and keeps updating."""
+    await load_with(hass, client, config_entry, declaring(make_declared("lux", "sensor", value=1)))
+
+    await relist(hass, client, freezer, declaring(make_declared("lux", "sensor", value=2, **{field: "plasma"})))
+    await relist(hass, client, freezer, declaring(make_declared("lux", "sensor", value=3, **{field: "plasma"})))
+
+    current = hass.states.get(LUX)
+    assert current is not None
+    assert current.state == "3"
+    assert attribute not in current.attributes
+    assert caplog.text.count("class 'plasma'") == 1
+
+
+async def test_new_sensor_with_unknown_class_is_still_added(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Its options go too, since Home Assistant accepts options only on an enum sensor."""
+    lux = make_declared("lux", "sensor", value=1, device_class="plasma", options=["1"])
+    await load_with(hass, client, config_entry, declaring(lux))
+
+    assert state(hass, LUX) == "1"
+    assert "motion_lights-living_room-lux: this Home Assistant has no device class 'plasma'" in caplog.text

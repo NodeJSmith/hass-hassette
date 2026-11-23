@@ -16,7 +16,7 @@ hassette's web UI. Each app device's **Visit** link opens that app's page in has
 ## Requirements
 
 - Home Assistant 2026.11.0 or newer
-- Home Assistant's built-in **Marketplace** (2026.11 and newer), or [HACS](https://hacs.xyz) on earlier versions
+- Home Assistant's built-in **Marketplace** or [HACS](https://hacs.xyz)
 - A hassette server that Home Assistant can reach over HTTP. hassette 0.66 or newer: an older hassette
   serves an API this integration can't use, and Home Assistant raises a repair telling you to upgrade.
 

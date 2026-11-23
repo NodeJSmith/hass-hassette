@@ -1,7 +1,7 @@
 # Design: App-declared entities from hassette's app listing
 
 **Date:** 2026-11-23
-**Status:** ratified
+**Status:** built
 **Mode:** sketch
 **Issues:** #72
 **Parent:** NodeJSmith/hassette `design/specs/155-hacs-app-entities/design.md` (Breakdown issue 5)
@@ -302,7 +302,7 @@ HA's own orphan state says exactly what happened with no extra code.
 
 - [x] Implementation and tests committed
 - [x] Docs
-- [ ] Ship-time challenge
+- [x] Ship-time challenge
 
 **Calls made during the build:**
 - The `pytest-homeassistant-custom-component` pin stays at 0.13.375 (HA 2026.10.4), and CI's `FLOOR_PHCC` stays at 0.13.363: no build for HA 2026.11 exists yet. The device-info code builds `ChildDeviceInfo` with keyword arguments, which give the same result from 2026.10.4's `TypedDict` and 2026.11's dataclass. `hacs.json` already says 2026.11.0, so the floor job fails until both pins move to a 2026.11 build, as does `uv.lock` until hassette-client 0.66.0 is on PyPI. Both are merge blockers; the user approved this plan at the start of the build.
@@ -313,3 +313,6 @@ HA's own orphan state says exactly what happened with no extra code.
 - hassette-client 0.66 adds `starting` and `stopping` app statuses. The v0.1 status sensor already lists every status, so they get translations, icons and README rows. `CONTROLLABLE_STATUSES` is unchanged, so the v0.1 switch and reload button stay unavailable during them, as for any status they don't list.
 - The app device's full fields moved into one `app_device_spec` in `coordinator.py`, used by the v0.1 entity and by the coordinator's registration, and v0.1's `run_action` and the declared commands share `run_command` in `entity.py`.
 - Unknown-platform declarations are logged at debug on each poll by the coordinator, not by the three platform listeners.
+- Declared switches (and buttons) show the declaration's `attributes` too, not only sensors: hassette's `IntegrationSwitch.set(attributes=)` publishes them (ship-time challenge Finding 4, the user's choice).
+- A sensor device or state class this HA doesn't know is left out with one warning, on add and on update (`try_parse_enum`, as ESPHome does), instead of raising. This narrows D4's accepted limitation to values HA still rejects after parsing, such as a timestamp without an offset (ship-time challenge Finding 5, the user's choice after a peer check).
+- Removing a declared entity or an instance device logs at INFO, since the user sees it disappear.

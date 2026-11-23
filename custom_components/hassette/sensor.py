@@ -10,6 +10,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
+from homeassistant.util.enum import try_parse_enum
 
 from .const import ATTR_ERROR_MESSAGE, ATTR_SERVER_STATUS
 from .coordinator import HassetteConfigEntry, HassetteCoordinator
@@ -77,8 +78,7 @@ class HassetteDeclaredSensor(HassetteDeclaredEntity, SensorEntity):
     """A sensor an app instance declares, showing the value and attributes the app last set.
 
     The unit, device class, state class and options are the declared ones. A device or state class this version
-    of Home Assistant doesn't know raises ``ValueError`` when Home Assistant adds the entity, so it isn't added
-    and the add is retried, with Home Assistant logging the error, on every poll (an accepted limitation, D4).
+    of Home Assistant doesn't know is left out with one warning, as ESPHome does, so the sensor still works.
     """
 
     def __init__(
@@ -90,7 +90,7 @@ class HassetteDeclaredSensor(HassetteDeclaredEntity, SensorEntity):
         parent_device_id: str,
     ) -> None:
         super().__init__(coordinator, app_key, instance, declared, parent_device_id)
-        # The timestamp and date values already warned about, so each is logged once.
+        # The unparsable values and unknown classes already warned about, so each is logged once.
         self.warned_values: set[str] = set()
 
     @property
@@ -103,14 +103,8 @@ class HassetteDeclaredSensor(HassetteDeclaredEntity, SensorEntity):
             return declared.value
         raw = str(declared.value)
         parsed = parse_date_value(raw, device_class)
-        if parsed is None and raw not in self.warned_values:
-            self.warned_values.add(raw)
-            _LOGGER.warning(
-                "%s: hassette sent %r, which isn't a valid %s; showing it as unknown",
-                self.entity_id,
-                raw,
-                device_class,
-            )
+        if parsed is None:
+            self.warn_once(raw, f"hassette sent {raw!r}, which isn't a valid {device_class}; showing it as unknown")
         return parsed
 
     @property
@@ -121,22 +115,34 @@ class HassetteDeclaredSensor(HassetteDeclaredEntity, SensorEntity):
     @property
     def device_class(self) -> SensorDeviceClass | None:
         declared = self.declared
-        return None if declared is None or declared.device_class is None else SensorDeviceClass(declared.device_class)
+        if declared is None or declared.device_class is None:
+            return None
+        if (parsed := try_parse_enum(SensorDeviceClass, declared.device_class)) is None:
+            self.warn_once(f"device_class:{declared.device_class}", unknown_class("device", declared.device_class))
+        return parsed
 
     @property
     def state_class(self) -> SensorStateClass | None:
         declared = self.declared
-        return None if declared is None or declared.state_class is None else SensorStateClass(declared.state_class)
+        if declared is None or declared.state_class is None:
+            return None
+        if (parsed := try_parse_enum(SensorStateClass, declared.state_class)) is None:
+            self.warn_once(f"state_class:{declared.state_class}", unknown_class("state", declared.state_class))
+        return parsed
+
+    def warn_once(self, key: str, message: str) -> None:
+        """Log a warning about this sensor's declaration the first time ``key`` is seen."""
+        if key in self.warned_values:
+            return
+        self.warned_values.add(key)
+        # HA reads the classes while adding the entity, before it has an entity_id.
+        _LOGGER.warning("%s: %s", self.entity_id or self.unique_id, message)
 
     @property
     def options(self) -> list[str] | None:
+        # HA accepts options only on an enum sensor, so they go with an enum class this HA knows.
         declared = self.declared
-        return None if declared is None else declared.options
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        declared = self.declared
-        return None if declared is None else declared.attributes or None
+        return None if declared is None or self.device_class is not SensorDeviceClass.ENUM else declared.options
 
 
 def parse_date_value(raw: str, device_class: str) -> date | datetime | None:
@@ -147,3 +153,8 @@ def parse_date_value(raw: str, device_class: str) -> date | datetime | None:
         return date.fromisoformat(raw)
     except ValueError:
         return None
+
+
+def unknown_class(kind: str, value: str) -> str:
+    """The warning for a declared device or state class this version of Home Assistant doesn't have."""
+    return f"this Home Assistant has no {kind} class {value!r}; leaving it out"
