@@ -133,6 +133,9 @@ suggests is used when the entity is first created.
 - They're available only while the instance is running. A stopped or failed instance keeps its
   entities, unavailable.
 - A switch shows the state the app set. Turning it on or off asks the app to change it.
+- Attributes the app sets appear on the entity, except names Home Assistant sets itself, such as
+  `device_class`, `icon`, `friendly_name`, or a sensor's `state_class` and `last_reset`. Those are
+  left out with a warning in the log; declare the sensor's classes, unit and options instead.
 - When an instance leaves hassette's config, its device can be deleted the same way as a removed app's.
   If hassette stops listing the instance at all, Home Assistant shows its entities as no longer provided.
 

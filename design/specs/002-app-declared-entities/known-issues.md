@@ -52,29 +52,3 @@ If multiple hassette entries become a real setup, check the registry entry's `co
 
 Acceptance criteria:
 - Both add rules only count registrations owned by their own config entry.
-
-## KI-003: App attributes can override Home Assistant's own sensor attributes
-
-Status: open
-Recorded: 2026-11-23 (72-app-declared-entities)
-Source: ship-challenge
-Reason not fixed now: accepted-limitation
-Affected files:
-- custom_components/hassette/declared.py
-
-Issue:
-A declared entity's free-form `attributes` are merged after HA's computed attributes, so an app attribute named
-`state_class`, `options`, `unit_of_measurement`, `device_class`, `icon` or similar overrides or injects that
-attribute in HA, which can affect long-term statistics.
-
-Why deferred:
-It needs an app to choose a reserved name; the worst case is statistics noise that Developer tools can repair.
-HA's MQTT integration filters these names because it faces arbitrary publishers; here the framework's own users
-write the attributes.
-
-Recommended follow-up:
-If it happens, either filter HA-owned keys in `extra_state_attributes` or have hassette reject them when the
-attributes are set.
-
-Acceptance criteria:
-- An app attribute with an HA-reserved name no longer changes the entity's HA-computed attributes.

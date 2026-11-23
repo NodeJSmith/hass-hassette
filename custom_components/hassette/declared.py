@@ -4,11 +4,12 @@ A declared entity belongs to one instance of an app, not to the app: it sits on 
 child of the app's device), is available while that instance runs, and is identified by app, instance and key.
 """
 
+import logging
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
 from hassette_wire import AppInstance, AppSummary, DeclaredEntity, ResourceStatus
-from homeassistant.const import Platform
+from homeassistant.const import EntityCapabilityAttribute, EntityStateAttribute, Platform
 from homeassistant.core import callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -27,6 +28,17 @@ from .coordinator import (
 )
 from .entity import run_command
 
+_LOGGER = logging.getLogger(__name__)
+
+# Attribute names Home Assistant sets on every entity. HA merges extra attributes over an entity's capability
+# attributes, and writes these only when the entity has a value for them, so an app attribute with one of these
+# names would override or stand in for the entity's own. Latitude and longitude stay: apps set them to put an
+# entity on the map. A platform adds its own names in ``owned_attributes``.
+HA_OWNED_ATTRIBUTES = frozenset({*EntityStateAttribute, *EntityCapabilityAttribute}) - {
+    EntityStateAttribute.LATITUDE,
+    EntityStateAttribute.LONGITUDE,
+}
+
 type DeclaredEntityFactory = Callable[[HassetteCoordinator, str, AppInstance, DeclaredEntity, str], Entity]
 
 
@@ -39,6 +51,8 @@ class HassetteDeclaredEntity(CoordinatorEntity[HassetteCoordinator]):
     """
 
     _attr_has_entity_name = True
+    # The attribute names Home Assistant sets on this entity, which the app's attributes can't override.
+    owned_attributes: frozenset[str] = HA_OWNED_ATTRIBUTES
 
     def __init__(
         self,
@@ -64,6 +78,8 @@ class HassetteDeclaredEntity(CoordinatorEntity[HassetteCoordinator]):
             name=instance_device_name(instance.instance_name),
             parent_device_id=parent_device_id,
         )
+        # The problems with this entity's declaration already warned about, so each is logged once.
+        self.warned_keys: set[str] = set()
 
     @property
     def instance(self) -> AppInstance | None:
@@ -96,9 +112,13 @@ class HassetteDeclaredEntity(CoordinatorEntity[HassetteCoordinator]):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        """The attributes the app last set with the value."""
+        """The attributes the app last set with the value, less any Home Assistant owns (``owned_attributes``)."""
         declared = self.declared
-        return None if declared is None else declared.attributes or None
+        if declared is None or not declared.attributes:
+            return None
+        for name in sorted(self.owned_attributes.intersection(declared.attributes)):
+            self.warn_once(f"attribute:{name}", f"attribute {name!r} belongs to Home Assistant; leaving it out")
+        return {name: value for name, value in declared.attributes.items() if name not in self.owned_attributes} or None
 
     @property
     def available(self) -> bool:
@@ -109,6 +129,14 @@ class HassetteDeclaredEntity(CoordinatorEntity[HassetteCoordinator]):
             and instance.status == ResourceStatus.RUNNING
             and self.declared is not None
         )
+
+    def warn_once(self, key: str, message: str) -> None:
+        """Log a warning about this entity's declaration the first time ``key`` is seen."""
+        if key in self.warned_keys:
+            return
+        self.warned_keys.add(key)
+        # HA reads some properties while adding the entity, before it has an entity_id.
+        _LOGGER.warning("%s: %s", self.entity_id or self.unique_id, message)
 
     async def run_command(self, command: Awaitable[Any], what: str) -> None:
         """Await a command for this entity, sent through the polling client: hassette answers once it is dispatched."""

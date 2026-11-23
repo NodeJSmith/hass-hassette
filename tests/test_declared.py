@@ -359,6 +359,38 @@ async def test_enum_sensor_passes_its_options(
     assert (current.state, current.attributes["options"]) == ("away", ["home", "away"])
 
 
+@pytest.mark.parametrize("state_class", ["measurement", None])
+async def test_attributes_home_assistant_owns_are_left_out(
+    state_class: str | None,
+    hass: HomeAssistant,
+    client: MagicMock,
+    config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An app attribute can't stand in for the sensor's own state class, which the recorder reads from the state."""
+    attributes = {"state_class": "total_increasing", "last_reset": "2024-01-01T00:00:00Z", "latitude": 1.5, "raw": 7}
+    lux = make_declared("lux", "sensor", value=1, state_class=state_class, attributes=attributes)
+    await load_with(hass, client, config_entry, declaring(lux))
+
+    assert (current := hass.states.get(LUX)) is not None
+    assert current.attributes.get("state_class") == state_class
+    assert "last_reset" not in current.attributes
+    assert (current.attributes["latitude"], current.attributes["raw"]) == (1.5, 7)
+    assert caplog.text.count("attribute 'state_class'") == caplog.text.count("attribute 'last_reset'") == 1
+
+
+async def test_switch_keeps_sensor_attribute_names_but_not_home_assistants(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry
+) -> None:
+    attributes = {"device_class": "outlet", "options": ["a", "b"]}
+    await load_with(hass, client, config_entry, declaring(make_declared("occupied", value=True, attributes=attributes)))
+
+    current = hass.states.get(OCCUPIED)
+    assert current is not None
+    assert "device_class" not in current.attributes
+    assert current.attributes["options"] == ["a", "b"]
+
+
 @pytest.mark.parametrize(
     ("device_class", "value", "expected"),
     [

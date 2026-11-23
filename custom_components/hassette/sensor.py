@@ -1,11 +1,18 @@
 """The status sensor on each hassette app's device, and the sensors app instances declare."""
 
-import logging
 from datetime import date, datetime
 from typing import Any
 
-from hassette_wire import AppInstance, AppStatus, DeclaredEntity, UnknownValue
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription, SensorStateClass
+from hassette_wire import AppStatus, UnknownValue
+from homeassistant.components.sensor import (
+    ATTR_LAST_RESET,
+    ATTR_OPTIONS,
+    ATTR_STATE_CLASS,
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -13,12 +20,10 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.enum import try_parse_enum
 
 from .const import ATTR_ERROR_MESSAGE, ATTR_SERVER_STATUS
-from .coordinator import HassetteConfigEntry, HassetteCoordinator
-from .declared import HassetteDeclaredEntity, add_declared_entities
+from .coordinator import HassetteConfigEntry
+from .declared import HA_OWNED_ATTRIBUTES, HassetteDeclaredEntity, add_declared_entities
 from .entity import HassetteAppEntity, add_app_entities
 from .errors import truncate_detail
-
-_LOGGER = logging.getLogger(__name__)
 
 # Reads only coordinator data.
 PARALLEL_UPDATES = 0
@@ -81,17 +86,8 @@ class HassetteDeclaredSensor(HassetteDeclaredEntity, SensorEntity):
     of Home Assistant doesn't know is left out with one warning, as ESPHome does, so the sensor still works.
     """
 
-    def __init__(
-        self,
-        coordinator: HassetteCoordinator,
-        app_key: str,
-        instance: AppInstance,
-        declared: DeclaredEntity,
-        parent_device_id: str,
-    ) -> None:
-        super().__init__(coordinator, app_key, instance, declared, parent_device_id)
-        # The unparsable values and unknown classes already warned about, so each is logged once.
-        self.warned_keys: set[str] = set()
+    # The recorder reads the state class and last reset from the state, so an app attribute can't stand in for them.
+    owned_attributes = HA_OWNED_ATTRIBUTES | {ATTR_STATE_CLASS, ATTR_OPTIONS, ATTR_LAST_RESET}
 
     @property
     def native_value(self) -> str | int | float | date | datetime | None:
@@ -129,14 +125,6 @@ class HassetteDeclaredSensor(HassetteDeclaredEntity, SensorEntity):
         if (parsed := try_parse_enum(SensorStateClass, declared.state_class)) is None:
             self.warn_once(f"state_class:{declared.state_class}", unknown_class("state", declared.state_class))
         return parsed
-
-    def warn_once(self, key: str, message: str) -> None:
-        """Log a warning about this sensor's declaration the first time ``key`` is seen."""
-        if key in self.warned_keys:
-            return
-        self.warned_keys.add(key)
-        # HA reads the classes while adding the entity, before it has an entity_id.
-        _LOGGER.warning("%s: %s", self.entity_id or self.unique_id, message)
 
     @property
     def options(self) -> list[str] | None:
