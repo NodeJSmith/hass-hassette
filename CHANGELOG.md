@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.8.0...v0.9.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* Requires hassette 0.66 or newer and Home Assistant 2026.11.0 or newer. Upgrade hassette before updating the integration; an older hassette raises a repair telling you to upgrade.
+* require hassette 0.64 for hassette-client 0.65 ([#77](https://github.com/NodeJSmith/hass-hassette/issues/77))
+
+### Features
+
+* add the entities hassette app instances declare ([#79](https://github.com/NodeJSmith/hass-hassette/issues/79)) ([c60c0ff](https://github.com/NodeJSmith/hass-hassette/commit/c60c0ffc1024e045beb79dec9f4f85fea88ed44c))
+* require hassette 0.64 for hassette-client 0.65 ([#77](https://github.com/NodeJSmith/hass-hassette/issues/77)) ([1000f5f](https://github.com/NodeJSmith/hass-hassette/commit/1000f5f244218592b2b32093d92e2ea887d444ff))
+* update declared entities and app status live from hassette ([#86](https://github.com/NodeJSmith/hass-hassette/issues/86)) ([79a5dc0](https://github.com/NodeJSmith/hass-hassette/commit/79a5dc0b43cc81427d926d5eac33e2b8526db582))
+
 ## [0.8.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.7.0...v0.8.0) (2026-11-17)
 
 ### Breaking Changes
