@@ -220,6 +220,15 @@ and the action can't tell whether an app acted on it.
 
 ## Troubleshooting
 
+**Can't receive hassette's live updates.** The integration couldn't open hassette's live connection,
+so values update with each 30-second poll instead of within a second. Nothing goes unavailable. If
+hassette is behind a reverse proxy, the proxy has to pass WebSocket connections through (in nginx,
+the `Upgrade` and `Connection` headers on the `/api/ws` location). The integration retries after
+each poll and logs again once it's receiving updates.
+
+**hassette sent a live update this integration can't read.** hassette is newer than this
+integration knows about. Values still update with each poll; update the integration.
+
 **Failed to connect, or timed out connecting.** Check that the URL works from where Home Assistant
 runs, not just from your browser. For Home Assistant OS, open the Terminal add-on and run
 `curl -s <url>/api/health/live`.

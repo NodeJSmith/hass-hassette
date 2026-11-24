@@ -141,6 +141,8 @@ class FakeStream:
         on_connected: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self.connects += 1
+        # The real listen() suspends connecting and reading the server's connected message first.
+        await asyncio.sleep(0)
         if on_connected is not None:
             await on_connected()
         while True:

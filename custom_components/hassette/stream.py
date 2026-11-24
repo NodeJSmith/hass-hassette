@@ -1,6 +1,6 @@
 """Receive hassette's ``/ws`` pushes, so declared entity values and app status reach Home Assistant as they change.
 
-The 30 s poll stays the source of truth for everything the stream doesn't carry (health, devices, removing
+The poll stays the source of truth for everything the stream doesn't carry (health, devices, removing
 undeclared entities), and stands in for a reconnect loop: a stream that ends is started again after the next
 good poll, so it never retries against a hassette the poll can't reach or a token the poll found rejected.
 """
@@ -8,7 +8,7 @@ good poll, so it never retries against a hassette the poll can't reach or a toke
 import asyncio
 import logging
 
-from hassette_client import HassetteClientError
+from hassette_client import HassetteClientError, ResponseValidationError
 from hassette_wire import (
     AppsChangedWsMessage,
     AppStatusChangedData,
@@ -18,6 +18,7 @@ from hassette_wire import (
 )
 from homeassistant.core import callback
 
+from .const import SCAN_INTERVAL
 from .coordinator import DECLARED_PLATFORMS, PUSH_SKIP_REASONS, HassetteConfigEntry, HassetteCoordinator, PushOutcome
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,8 +48,13 @@ class HassetteStream:
         self.task: asyncio.Task[None] | None = None
         # The coordinator's last_applied_fetch when the stream last looked. A restart waits for a later one.
         self.seen_fetch = coordinator.last_applied_fetch
-        # The exception types a stream ended with since it last connected, so each one is logged once.
+        # Whether a connect resync has succeeded since setup: until then the stream has never worked, and an
+        # ending is a warning.
+        self.has_resynced = False
+        # The exception types a stream ended with since a resync last succeeded, so each one is logged once.
         self.logged_failures: set[str] = set()
+        # A message this integration can't read is reported once per setup: reconnecting doesn't fix it.
+        self.reported_unreadable = False
 
     @callback
     def start(self) -> None:
@@ -58,13 +64,10 @@ class HassetteStream:
 
     @callback
     def launch(self) -> None:
-        # Not eager: the connect resync fires coordinator listeners, and they must find this task already held,
-        # or restart_after_good_poll would start a second stream.
+        # Eager, which is safe because listen() suspends connecting before it awaits on_connected: the resync's
+        # coordinator listeners then find this task held, so restart_after_good_poll doesn't start a second one.
         self.task = self.entry.async_create_background_task(
-            self.coordinator.hass,
-            self.run(),
-            name=f"{STREAM_TASK_NAME} {self.entry.entry_id}",
-            eager_start=False,
+            self.coordinator.hass, self.run(), name=f"{STREAM_TASK_NAME} {self.entry.entry_id}"
         )
 
     @callback
@@ -87,6 +90,8 @@ class HassetteStream:
         """Listen until the stream ends, then log why; the next good poll starts it again."""
         try:
             await self.coordinator.client.listen(self.on_message, types=MESSAGE_TYPES, on_connected=self.on_connected)
+        except ResponseValidationError as exc:
+            self.log_unreadable_once(exc)
         except (HassetteClientError, ResyncFailedError) as exc:
             self.log_failure_once(exc)
         except Exception:
@@ -100,12 +105,16 @@ class HassetteStream:
         listing is lost. ``async_refresh`` waits for any poll in flight, and that poll may have read its listing
         before the subscription, so only a fetch started after this point counts.
         """
-        _LOGGER.info("Connected to hassette's /ws stream")
-        self.logged_failures.clear()
+        _LOGGER.debug("Connected to hassette's /ws stream; fetching a listing")
         before = self.coordinator.fetches_started
         await self.coordinator.async_refresh()
         if self.coordinator.last_applied_fetch <= before:
             raise ResyncFailedError("the listing fetched on connect wasn't applied")
+        # The stream works: say so the first time and after a logged failure, and re-arm the failure log.
+        if not self.has_resynced or self.logged_failures:
+            _LOGGER.info("Receiving hassette's live updates")
+        self.has_resynced = True
+        self.logged_failures.clear()
 
     async def on_message(self, message: StreamMessage) -> None:
         """Apply an entity value, or ask for a listing when the message says the held one is out of date.
@@ -167,7 +176,7 @@ class HassetteStream:
         """Ask for a debounced refresh without waiting for it.
 
         The debouncer can fold the request into a poll already in flight, whose listing may predate the push.
-        The next scheduled poll then brings the change, up to 30 s later.
+        The next scheduled poll then brings the change, up to one poll interval later.
         """
         _LOGGER.debug("Refreshing from hassette: %s", reason)
         self.entry.async_create_background_task(
@@ -176,15 +185,40 @@ class HassetteStream:
             name=f"hassette refresh after a /ws push {self.entry.entry_id}",
         )
 
-    def log_failure_once(self, exc: Exception) -> None:
-        """Log a stream ending at info, once per exception type until the stream next connects.
+    def log_unreadable_once(self, exc: ResponseValidationError) -> None:
+        """Warn about a message this integration can't read, once per setup: reconnecting doesn't fix it.
 
-        A later ending of the same type with a different message isn't logged.
+        Unlike an unreadable poll response (``log_poll_error_once``), this never re-arms: the stream keeps
+        reconnecting into the same message, while the poll's error clears when a response reads again.
+        """
+        if self.reported_unreadable:
+            return
+        self.reported_unreadable = True
+        _LOGGER.warning(
+            "hassette sent a live update this integration can't read (%s); values still update with each poll. "
+            "Update the integration if this repeats",
+            exc,
+        )
+
+    def log_failure_once(self, exc: Exception) -> None:
+        """Log why a stream ended, once per exception type until a connect resync next succeeds.
+
+        Before the stream has ever worked this session, an ending is a warning, since it is usually something no
+        reconnect fixes, such as a proxy that doesn't pass WebSockets. A drop of a stream that worked is info. A
+        later ending of an already logged type, even with a different message, isn't logged.
         """
         kind = type(exc).__name__
         if kind in self.logged_failures:
             return
         self.logged_failures.add(kind)
-        _LOGGER.info(
-            "hassette's /ws stream ended (%s); polling continues and it reconnects after the next good poll", exc
-        )
+        if self.has_resynced:
+            _LOGGER.info(
+                "hassette's /ws stream ended (%s); polling continues and it reconnects after the next good poll", exc
+            )
+        else:
+            _LOGGER.warning(
+                "Can't receive hassette's live updates (%s); values update with each %d s poll instead. If this "
+                "repeats and hassette is behind a proxy, the proxy has to pass WebSocket connections through",
+                exc,
+                SCAN_INTERVAL.total_seconds(),
+            )

@@ -68,20 +68,25 @@ DECLARED_PLATFORMS = frozenset({Platform.BUTTON, Platform.SENSOR, Platform.SWITC
 
 type HassetteConfigEntry = ConfigEntry[HassetteCoordinator]
 
+# A declared entity's identity in the held data: app key, instance name, entity key and platform. Not its
+# unique_id (declared_unique_id), which leaves out the platform because HA scopes unique_ids per platform.
+type EntityKey = tuple[str, str, str, str]
+
 
 @dataclass(frozen=True, slots=True)
 class HassetteData:
     """The server's health and its apps keyed by app_key, from the latest good poll and the pushes applied since.
 
-    ``entity_marks`` orders declared entity values: the newest ``entity_revision`` applied to each instance's
-    entities, keyed by ``instance_identifier``, whether it came from a listing or a push. Revisions compare only
-    within ``boot_id``, the hassette boot the listing came from.
+    Declared entity values are ordered by revision. ``entity_revision`` is the revision the listing was read at.
+    ``pushed_revisions`` holds, for each entity a push replaced at a higher revision, that push's revision, keyed
+    by ``EntityKey``. Revisions compare only within ``boot_id``, the hassette boot the listing came from.
     """
 
     health: SystemStatusResponse
     apps: dict[str, AppSummary]
     boot_id: str
-    entity_marks: dict[str, int]
+    entity_revision: int
+    pushed_revisions: dict[EntityKey, int]
 
 
 class PushOutcome(Enum):
@@ -218,48 +223,53 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
     ) -> HassetteData:
         """Combine a fresh listing (``usable_apps`` is its apps with a usable key) with the held data.
 
-        Everything follows the listing except declared entity values the held data has newer, from a push
-        applied while this poll's HTTP await was pending (see ``merge_instance``). A listing from a new boot is
-        taken whole.
+        Everything follows the listing except a declared entity a push replaced with a revision newer than the
+        listing's, from a push applied while this poll's HTTP await was pending: that entity keeps its held
+        declaration, value, attributes and mark. Which entities exist still follows the listing. A listing from a
+        new boot is taken whole.
         """
         held = self.data if self.data is not None and self.data.boot_id == listing.boot_id else None
+        newer = {} if held is None else {k: r for k, r in held.pushed_revisions.items() if r > listing.entity_revision}
         merged: dict[str, AppSummary] = {}
-        marks: dict[str, int] = {}
+        marks: dict[EntityKey, int] = {}
         for app in usable_apps:
             held_app = held.apps.get(app.app_key) if held is not None else None
             instances: list[AppInstance] = []
             for instance in app.instances:
-                identifier = instance_identifier(app.app_key, instance.instance_name)
                 held_instance = find_instance(held_app, instance.instance_name) if held_app is not None else None
-                held_mark = held.entity_marks.get(identifier, 0) if held is not None else 0
-                merged_instance, marks[identifier] = merge_instance(
-                    instance, held_instance, held_mark, listing.entity_revision
-                )
+                merged_instance, kept = keep_newer_pushes(app.app_key, instance, held_instance, newer)
                 instances.append(merged_instance)
+                marks.update(kept)
             merged[app.app_key] = app.model_copy(update={"instances": instances})
-        return HassetteData(health=health, apps=merged, boot_id=listing.boot_id, entity_marks=marks)
+        return HassetteData(
+            health=health,
+            apps=merged,
+            boot_id=listing.boot_id,
+            entity_revision=listing.entity_revision,
+            pushed_revisions=marks,
+        )
 
     def apply_entity_push(self, push: EntityStateChangedData) -> PushOutcome:
         """Apply a pushed entity value to the held data and update the entities, unless it is skipped.
 
         It applies only to an entity the held listing has, from the listing's boot, with a revision newer than
-        its instance's mark. ``self.data`` is replaced, not mutated, and ``async_set_updated_data`` isn't used,
-        because it would push the next poll back a full interval on every push.
+        both the listing's and any push already applied to that entity. ``self.data`` is replaced, not mutated,
+        and ``async_set_updated_data`` isn't used, because it would push the next poll back a full interval on
+        every push.
         """
         held = self.data
         if held is None or push.boot_id != held.boot_id:
             return PushOutcome.OTHER_BOOT
-        identifier = instance_identifier(push.app_key, push.instance_name)
-        if (mark := held.entity_marks.get(identifier)) is not None and push.entity_revision <= mark:
+        entity = push.entity
+        key = entity_key(push.app_key, push.instance_name, entity)
+        if push.entity_revision <= max(held.entity_revision, held.pushed_revisions.get(key, 0)):
             return PushOutcome.STALE
         app = held.apps.get(push.app_key)
         instance = find_instance(app, push.instance_name) if app is not None else None
-        entity = push.entity
-        if app is None or instance is None or find_entity(instance.entities or [], entity.key, entity.platform) is None:
+        replaced = find_entity(instance.entities or [], entity.key, entity.platform) if instance is not None else None
+        if app is None or instance is None or replaced is None:
             return PushOutcome.UNKNOWN_TARGET
-        entities = [
-            entity if (e.key, e.platform) == (entity.key, entity.platform) else e for e in instance.entities or []
-        ]
+        entities = [entity if e is replaced else e for e in instance.entities or []]
         instances = [
             i.model_copy(update={"entities": entities}) if i.instance_name == push.instance_name else i
             for i in app.instances
@@ -268,7 +278,8 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
             health=held.health,
             apps={**held.apps, app.app_key: app.model_copy(update={"instances": instances})},
             boot_id=held.boot_id,
-            entity_marks={**held.entity_marks, identifier: push.entity_revision},
+            entity_revision=held.entity_revision,
+            pushed_revisions={**held.pushed_revisions, key: push.entity_revision},
         )
         self.async_update_listeners()
         return PushOutcome.APPLIED
@@ -526,23 +537,35 @@ def find_entity(entities: Iterable[DeclaredEntity], key: str, platform: str) -> 
     return next((entity for entity in entities if entity.key == key and entity.platform == platform), None)
 
 
-def merge_instance(
-    listed: AppInstance, held: AppInstance | None, held_mark: int, listing_revision: int
-) -> tuple[AppInstance, int]:
-    """An instance from a fresh listing merged with the held copy, and the instance's new mark.
+def entity_key(app_key: str, instance_name: str, entity: DeclaredEntity) -> EntityKey:
+    """The key a declared entity's push mark is held under."""
+    return (app_key, instance_name, entity.key, entity.platform)
 
-    When the held mark is newer than the listing, every entity the listing also lists keeps its held declaration,
-    value and attributes: pushes apply in revision order, so each held value is at least as new as the listing's.
-    Which entities exist, and every other field, follow the listing. An instance listed without ``entities`` keeps
-    the held list and mark, since the listing carried no values for it.
+
+def keep_newer_pushes(
+    app_key: str, listed: AppInstance, held: AppInstance | None, newer: dict[EntityKey, int]
+) -> tuple[AppInstance, dict[EntityKey, int]]:
+    """A listed instance with each entity in ``newer`` (pushed after the listing was read) taken from ``held``.
+
+    Returns the instance and the marks it keeps. Only the pushed entities themselves are kept: a declaration
+    commit raises the revision but sends nothing on the stream, so every other entity is as new in the listing.
     """
-    if held is not None and listed.entities is None:
-        return listed.model_copy(update={"entities": held.entities}), held_mark
-    mark = max(held_mark, listing_revision)
-    if held is None or held.entities is None or held_mark <= listing_revision:
-        return listed, mark
-    entities = [find_entity(held.entities, e.key, e.platform) or e for e in listed.entities or []]
-    return listed.model_copy(update={"entities": entities}), mark
+    if held is None:
+        return listed, {}
+    kept: dict[EntityKey, int] = {}
+    entities: list[DeclaredEntity] = []
+    for entity in listed.entities or []:
+        key = entity_key(app_key, listed.instance_name, entity)
+        pushed = find_entity(held.entities or [], entity.key, entity.platform) if key in newer else None
+        # A mark whose entity the held copy lacks has nothing to keep, so it is dropped with the listing's value.
+        if pushed is None:
+            entities.append(entity)
+            continue
+        entities.append(pushed)
+        kept[key] = newer[key]
+    if not kept:
+        return listed, {}
+    return listed.model_copy(update={"entities": entities}), kept
 
 
 def known_declarations(instance: AppInstance) -> list[DeclaredEntity]:

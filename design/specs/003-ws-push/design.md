@@ -5,7 +5,7 @@
 **Mode:** sketch
 **Issues:** #73
 **Parent:** NodeJSmith/hassette `design/specs/155-hacs-app-entities/design.md` (Breakdown issue 6)
-**Prior art:** NodeJSmith/hassette `design/research/2026-11-23-push-poll-hybrid/prior-art.md`, NodeJSmith/hassette `design/research/2026-11-22-python-ws-client-subscriptions/prior-art.md`, NodeJSmith/hassette `design/research/2026-11-16-app-declared-ha-entities/prior-art.md`
+**Prior art:** NodeJSmith/hassette `design/research/2026-11-23-push-poll-hybrid/prior-art.md`, NodeJSmith/hassette `design/research/2026-11-23-push-stream-failure-reporting/prior-art.md`, NodeJSmith/hassette `design/research/2026-11-22-python-ws-client-subscriptions/prior-art.md`, NodeJSmith/hassette `design/research/2026-11-16-app-declared-ha-entities/prior-art.md`
 
 ## Summary
 
@@ -17,7 +17,7 @@ outlasts the action refresh. This change keeps the poll and adds a subscription 
 coordinator's data within a second, a newer `app_status_changed` or an `apps_changed` requests a refresh (D2, D4),
 and every (re)connect resyncs from the listing. A dropped stream falls back to polling.
 
-In scope: the stream task and its reconnect (D3), applying entity pushes, the per-instance entity revision
+In scope: the stream task and its reconnect (D3), applying entity pushes, the per-entity revision
 ordering spec 002 D3 deferred here, status pushes (D2), the `apps_changed` refetch, and the README's "Updates"
 section. Out of scope: any hassette-side change (the wire and `listen()` shipped in hassette 0.66.0), the
 end-to-end test and the README's declared-entities walkthrough (hassette#4221), a different poll interval, and
@@ -38,8 +38,9 @@ Where each new piece lives:
   - the logging of connects, drops and pushes not applied (Posture).
   `async_setup_entry` in `__init__.py` starts it after `async_forward_entry_setups`, so the platforms' listeners
   exist before the first push.
-- **The revision marks:** two new fields on `HassetteData` in `coordinator.py`: the listing's `boot_id`, and
-  the last applied `entity_revision` per instance (keyed by `instance_identifier`). They describe the data they
+- **The revision marks:** three new fields on `HassetteData` in `coordinator.py`: the listing's `boot_id`, the
+  listing's `entity_revision`, and the revision of each entity a push replaced since that listing (keyed by
+  app, instance, key and platform; ship-time challenge, D5). They describe the data they
   sit beside, so the tolerated-failure path that returns `self.data` keeps them consistent with no extra step,
   and a push replaces data and marks together.
 - **The apply rules:** two methods on `HassetteCoordinator`: one that merges a fresh listing with the held data
@@ -60,8 +61,14 @@ Where each new piece lives:
 - **Scope:** minimal: entity pushes, status pushes, the `apps_changed` refetch and the resync on every
   (re)connect. No UI and no new options.
 - **Rollout:** ships outright, in the same hass-hassette release as #72 (release PR #78 is held for it).
-- **Hardening:** project defaults. Stream connects and drops are logged at info; a failure kind that repeats
-  is logged once until the stream next connects, as `HassetteCoordinator.log_poll_error_once` does for polls.
+- **Hardening:** project defaults. The stream counts as working once a connect resync succeeds. A stream
+  ending before it has worked this session is a warning, once per exception type; a drop of a working stream
+  is info, once per exception type; the record re-arms when a resync succeeds, not on connect. A message the integration can't
+  read is a warning once per setup, never re-armed (unlike an unreadable poll response, which re-arms on a good
+  poll), since the stream reconnects into the same message. (Revised at the ship-time challenge from "info, once until the stream next
+  connects", which hid a stream that never works, such as behind a proxy without WebSocket support, and
+  repeated every 30 s for one that connects and then fails; prior art: hassette
+  `design/research/2026-11-23-push-stream-failure-reporting/prior-art.md`.)
   Each push that isn't applied is logged at debug with its reason (another boot, unknown target, stale
   revision). A diagnostics download with stream health is #81, not this change.
 - **Altitude:** build; one session builds it in hass-hassette.
@@ -203,7 +210,7 @@ trigger only runs late, and the poll heals it.
 
 ### D5: How does a fresh listing merge with the held data?
 
-**Situation:** the per-instance marks order declared entity values only. A listing also carries each
+**Situation:** the marks order declared entity values only. A listing also carries each
 instance's status, `needs_restart`, error fields, `in_current_config`, the app-level fields and the
 declarations, which no mark orders. When a poll's HTTP await overlaps a push, the listing can be older than an
 entity value the push applied. Taking the listing's instance whole loses that value; keeping the held instance
@@ -218,7 +225,7 @@ whole loses the fresher status the listing carries, which D2 relies on. HA assig
 | Status under a racing push | Always from the newest listing | The racing listing's fresher status dropped until the next refresh (up to 30 s) |
 | Entity values | Ordered by marks (parent D3) | Ordered by marks |
 | Code | Overlay held entity values onto the listing's instance | Pick the held or listed instance |
-| Mark update rule | An applied listing sets each instance's mark to its revision; a higher held mark stays | Same rule needed |
+| Mark update rule | An applied listing drops each mark at or below its revision; a higher held mark stays | Same rule needed |
 | Matches D2 ("status comes from the listing") | Yes | Only when no push raced |
 | Peers | Teslemetry merges local-poll fields into `data` (`self.data = merged`); no peer found that orders pushes against listings by revision | Same |
 
@@ -226,7 +233,7 @@ whole loses the fresher status the listing carries, which D2 relies on. HA assig
 that orders it, which D2's premise needs.
 **Pick B instead if** you want a whole-instance choice and accept a racing listing's status waiting up to 30 s.
 **Reversibility:** easy.
-**Ratified:** Chose a per-field merge (each instance takes everything from the listing except its declared entities, each of which is taken whole (value and attributes) from the held data, matched by `(key, platform)`, when the boot matches and the instance's mark exceeds the listing's `entity_revision`; the entity set itself follows the listing, and an instance listed with `entities` `None` keeps the held list; an applied listing raises each mark to its revision; a new `boot_id` takes the listing whole and resets the marks; the merge reads `self.data` and builds the result after the last await, in one synchronous step) over swapping whole instances, so every field comes from the newest source that orders it as D2 assumes, accepting a per-entity overlay as the integration's one piece of merge code.
+**Ratified:** Chose a per-field merge (each instance takes everything from the listing except a declared entity a push replaced at a revision newer than the listing's `entity_revision`, which is taken whole (declaration, value and attributes) from the held data, matched by `(key, platform)`, with its mark; the entity set itself follows the listing; a push applies only when its revision exceeds both the held listing's and that entity's own mark; a new `boot_id` takes the listing whole and drops the marks; the merge reads `self.data` and builds the result after the last await, in one synchronous step) over swapping whole instances, so every field comes from the newest source that orders it as D2 assumes, accepting a per-entity overlay as the integration's one piece of merge code. Amended at the ship-time challenge: the marks were per instance, which let one pushed entity hold back a racing listing's newer declarations and values for the instance's other entities (declaration commits raise the revision but send nothing on `/ws`), and an `entities` `None` clause was dropped because `GET /api/apps` always fills `entities`.
 
 ## Assumed
 
@@ -249,7 +256,7 @@ that orders it, which D2's premise needs.
   listing with a new `boot_id` discards every mark held. Evidence: `AppListResponse` field docs.
 - An `entity_state_changed` push carries `boot_id`, `entity_revision`, `app_key`, `instance_name` and the
   entity's full `DeclaredEntity` (name, value, attributes). It applies only when its `boot_id` equals the held
-  listing's and its `entity_revision` is greater than that instance's mark. A push from another boot is ignored,
+  listing's and its `entity_revision` is greater than both the held listing's and that entity's own mark (D5). A push from another boot is ignored,
   not treated as a restart, because a restart during the `on_connected` fetch can leave old-boot messages queued
   on the socket. Evidence: `HassetteClient.listen` docstring; `EntityStateChangedData`.
 - Only the listing creates or removes entities. A push for an app, instance or `(key, platform)` the held
@@ -302,7 +309,5 @@ that orders it, which D2's premise needs.
 
 **Calls made during the build:**
 - Fetch numbers stand in for "`last_success` advanced" (D4): each refresh numbers its fetch when it starts (`fetches_started`), and a refresh whose listing was applied records its number (`last_applied_fetch`), set with `last_success` after the data is built. The connect resync passes only when a fetch started after subscribing was applied, so a poll already in flight (which may have read its listing before the subscription) can't pass for it, and two good polls in one clock tick still count as two. The restart rule (D3) compares `last_applied_fetch` the same way.
-- The stream task starts with `eager_start=False`: the connect resync fires coordinator listeners while the task runs, and an eager start runs that before `launch` has stored the task handle, so the restart listener saw no stream and started a second one.
-- An instance listed with `entities` `None` keeps the held list and its held mark, rather than having the mark raised to the listing's revision (D5): that listing carried no values for the instance, so raising the mark would reject a later push whose value the listing never delivered.
-- A failed connect resync raises `ResyncFailedError` and is logged with the client errors that end a stream (info, once per kind until the next connect); any other exception out of `listen()` is an apply bug and is logged with its traceback on every cycle, as D3 accepts.
+- A failed connect resync raises `ResyncFailedError` and is logged with the client errors that end a stream (per the Hardening stance); any other exception out of `listen()` is an apply bug and is logged with its traceback on every cycle, as D3 accepts.
 - A status delta for an app key `usable_app_key` rejects is dropped before its revision check, matching D4's skip filter for unknown targets.

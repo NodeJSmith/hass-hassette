@@ -2,12 +2,14 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
-from hassette_client import HassetteConnectionError, HassetteTimeoutError
+from hassette_client import HassetteConnectionError, HassetteTimeoutError, ResponseValidationError
+from hassette_client.stream import message_classes
 from hassette_wire import (
     AppListResponse,
     AppsChangedData,
@@ -30,6 +32,7 @@ from custom_components.hassette.stream import MESSAGE_TYPES
 from .conftest import FakeStream, make_app, make_declared, make_instance, poll, settle, stream_running
 
 LUX = "sensor.motion_lights_living_room_lux"
+TEMP = "sensor.motion_lights_living_room_temp"
 OCCUPIED = "switch.motion_lights_living_room_occupied"
 SWITCH = "switch.motion_lights"
 
@@ -77,6 +80,20 @@ def apps_changed() -> AppsChangedWsMessage:
     return AppsChangedWsMessage(type="apps_changed", data=AppsChangedData(), timestamp=0.0)
 
 
+def timing_out_on(fails: Callable[[int], bool]) -> Callable[..., Awaitable[AppListResponse]]:
+    """A ``get_apps`` side effect: the default listing, except a timeout on each call number ``fails`` picks."""
+    calls = 0
+
+    async def get_apps(*_args: Any) -> AppListResponse:
+        nonlocal calls
+        calls += 1
+        if fails(calls):
+            raise HassetteTimeoutError("slow")
+        return listing(declaring(lux(3)))
+
+    return get_apps
+
+
 async def load(hass: HomeAssistant, client: MagicMock, entry: MockConfigEntry, apps: AppListResponse) -> FakeStream:
     client.get_apps.return_value = apps
     entry.add_to_hass(hass)
@@ -89,6 +106,12 @@ def current(hass: HomeAssistant, entity_id: str) -> State:
     found = hass.states.get(entity_id)
     assert found is not None
     return found
+
+
+@pytest.fixture
+async def loaded_stream(hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry) -> FakeStream:
+    """The entry loaded with one instance declaring lux at 3, its stream connected."""
+    return await load(hass, client, config_entry, listing(declaring(lux(3))))
 
 
 def state(hass: HomeAssistant, entity_id: str) -> str:
@@ -324,20 +347,23 @@ async def test_new_boot_takes_the_listing_whole_and_resets_marks(
     assert state(hass, LUX) == "5"
 
 
-async def test_instance_listed_without_entities_keeps_the_held_values(
+async def test_racing_listing_keeps_only_the_pushed_entity(
     hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
 ) -> None:
-    stream = await load(hass, client, config_entry, listing(declaring(lux(3)), revision=1))
-    await stream.send(hass, entity_push(lux(7), revision=2))
+    """A declaration commit sends no push, so an entity nobody pushed takes the racing listing's value."""
+    stream = await load(
+        hass, client, config_entry, listing(declaring(lux(3), make_declared("temp", "sensor", value=20)))
+    )
+    await stream.send(hass, entity_push(lux(7), revision=5))
 
-    unlisted = make_instance(entities=None)
-    client.get_apps.return_value = listing(make_app(instances=[unlisted.model_dump()]), revision=4)
+    # The instance reloaded at revision 3, committing a new temp value; lux was pushed after that read.
+    reloaded = declaring(lux(4), make_declared("temp", "sensor", value=21, unit="°C"))
+    client.get_apps.return_value = listing(reloaded, revision=3)
     await poll(hass, freezer)
-    assert state(hass, LUX) == "7"
 
-    # The listing carried no values for the instance, so its mark wasn't raised past the push.
-    await stream.send(hass, entity_push(lux(8), revision=3))
-    assert state(hass, LUX) == "8"
+    assert state(hass, LUX) == "7"
+    assert state(hass, TEMP) == "21"
+    assert current(hass, TEMP).attributes["unit_of_measurement"] == "°C"
 
 
 async def test_failed_resync_ends_the_stream_before_any_push_applies(
@@ -347,16 +373,8 @@ async def test_failed_resync_ends_the_stream_before_any_push_applies(
     await stream.send(hass, HassetteConnectionError("closed"))
 
     # The poll that restarts the stream succeeds, but the resync on connect gets a tolerated failure.
-    calls = 0
-
-    async def second_call_fails(*_args: Any) -> AppListResponse:
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise HassetteTimeoutError("slow")
-        return listing(declaring(lux(3)))
-
-    client.get_apps.side_effect = second_call_fails
+    # The poll that restarts the stream succeeds; the resync after it times out.
+    client.get_apps.side_effect = timing_out_on(lambda call: call == 2)
     queued = stream.queue_item(entity_push(lux(7), revision=2))
     await poll(hass, freezer)
     await settle(hass)
@@ -429,7 +447,7 @@ async def test_dropped_stream_restarts_only_after_a_good_poll(
     assert state(hass, LUX) == "7"
 
 
-async def test_repeated_drops_are_logged_once_until_the_stream_connects(
+async def test_repeated_drops_are_logged_once_until_a_resync_succeeds(
     hass: HomeAssistant,
     client: MagicMock,
     caplog: pytest.LogCaptureFixture,
@@ -447,7 +465,7 @@ async def test_repeated_drops_are_logged_once_until_the_stream_connects(
     await poll(hass, freezer)
     assert drop_logs() == 1
 
-    # A restart that connects clears the record, so the next drop is logged again.
+    # A restart whose resync succeeds clears the record, so the next drop is logged again.
     client.listen.side_effect = stream.listen
     await poll(hass, freezer)
     await stream.send(hass, HassetteConnectionError("closed"))
@@ -475,3 +493,139 @@ async def test_unload_cancels_the_stream(hass: HomeAssistant, client: MagicMock,
     await hass.async_block_till_done()
 
     assert not stream_running(hass)
+
+
+async def test_stream_that_never_works_warns_once(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+    client: MagicMock,
+    config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    client.listen.side_effect = HassetteConnectionError("didn't upgrade to a WebSocket")
+    await load(hass, client, config_entry, listing(declaring(lux(3))))
+    await poll(hass, freezer)
+    await poll(hass, freezer)
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "live updates" in r.getMessage()]
+    assert len(warnings) == 1
+    assert client.listen.await_count == 3
+
+
+async def test_drop_of_a_working_stream_is_info(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, caplog: pytest.LogCaptureFixture
+) -> None:
+    stream = await load(hass, client, config_entry, listing(declaring(lux(3))))
+    await stream.send(hass, HassetteConnectionError("closed"))
+
+    ended = [r for r in caplog.records if "stream ended" in r.getMessage()]
+    assert [r.levelno for r in ended] == [logging.INFO]
+
+
+async def test_resync_that_keeps_failing_logs_once(
+    hass: HomeAssistant,
+    client: MagicMock,
+    loaded_stream: FakeStream,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A stream that connects but never gets its resync applied doesn't re-arm the log on each connect."""
+    stream = loaded_stream
+    await stream.send(hass, HassetteConnectionError("closed"))
+    # Polls succeed; every resync, the call after a poll, times out.
+    client.get_apps.side_effect = timing_out_on(lambda call: call % 2 == 0)
+    for _ in range(3):
+        await poll(hass, freezer)
+        await settle(hass)
+
+    # The first connect at setup, then one restart after each of the three polls.
+    assert stream.connects == 4
+    assert sum("wasn't applied" in r.getMessage() for r in caplog.records) == 1
+    # No connect in the loop counts as the stream working again.
+    assert not any("Receiving hassette's live updates" in r.getMessage() for r in caplog.records)
+
+
+async def test_unreadable_message_warns_once_per_setup(
+    hass: HomeAssistant, loaded_stream: FakeStream, freezer: FrozenDateTimeFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    stream = loaded_stream
+    unreadable = ResponseValidationError(model="EntityStateChangedWsMessage", endpoint="GET /api/ws", problems=["x"])
+    await stream.send(hass, unreadable)
+    await poll(hass, freezer)
+    await stream.send(hass, unreadable)
+
+    assert stream.connects == 2
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "can't read" in r.getMessage()]
+    assert len(warnings) == 1
+
+
+def test_message_types_are_accepted_by_the_client() -> None:
+    assert set(message_classes(MESSAGE_TYPES)) == {"entity_state_changed", "app_status_changed", "apps_changed"}
+
+
+async def test_message_handling_never_waits_for_a_refresh(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry
+) -> None:
+    stream = await load(hass, client, config_entry, listing(declaring(lux(3))))
+    release = asyncio.Event()
+
+    async def slow_listing() -> AppListResponse:
+        await release.wait()
+        return listing(declaring(lux(3)))
+
+    client.get_apps.side_effect = slow_listing
+    handled = stream.queue_item(apps_changed())
+    # A few loop turns are enough for a handler that only schedules the refresh; one that awaited the refresh
+    # would still be waiting on the held listing however many turns it got.
+    for _ in range(20):
+        if handled.done():
+            break
+        await asyncio.sleep(0)
+
+    assert handled.done()
+    release.set()
+    await settle(hass)
+
+
+async def test_resync_in_the_same_clock_tick_as_the_first_poll_counts(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    """Frozen time gives the first poll and the connect resync one timestamp; the stream must still run."""
+    await load(hass, client, config_entry, listing(declaring(lux(3))))
+
+    assert stream_running(hass)
+
+
+async def test_stream_working_is_logged_once_it_resyncs(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, "custom_components.hassette.stream")
+    await load(hass, client, config_entry, listing(declaring(lux(3))))
+
+    assert sum("Receiving hassette's live updates" in r.getMessage() for r in caplog.records) == 1
+
+
+async def test_failed_first_resync_is_a_warning(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture, client: MagicMock, config_entry: MockConfigEntry
+) -> None:
+    # The first refresh at setup succeeds; the connect resync after it times out.
+    client.get_apps.side_effect = timing_out_on(lambda call: call == 2)
+    await load(hass, client, config_entry, listing(declaring(lux(3))))
+
+    assert not stream_running(hass)
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "live updates" in r.getMessage()]
+    assert len(warnings) == 1
+
+
+async def test_push_does_not_block_an_older_push_to_a_sibling_entity(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry
+) -> None:
+    """Marks are per entity: lux pushed at 5 doesn't make temp's push at 4 stale."""
+    temp = make_declared("temp", "sensor", value=20)
+    stream = await load(hass, client, config_entry, listing(declaring(lux(3), temp), revision=1))
+
+    await stream.send(hass, entity_push(lux(7), revision=5))
+    await stream.send(hass, entity_push(make_declared("temp", "sensor", value=22), revision=4))
+
+    assert state(hass, LUX) == "7"
+    assert state(hass, TEMP) == "22"
