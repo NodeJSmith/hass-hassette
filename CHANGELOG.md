@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.8.0...v0.9.0) (2026-11-24)
+
+### Breaking Changes
+
+- **Requires hassette 0.66 or newer and Home Assistant 2026.11.0 or newer.** The integration now uses hassette-client 0.66.0, which needs the API schema first served by hassette 0.66.0. Each app instance's entities sit on a Home Assistant child device, which needs Home Assistant 2026.11. Upgrade your hassette server first (the add-on updates on its own), then update the integration. With an older server, Home Assistant raises a repair asking you to upgrade it. (#77, #79)
+
+### You Can Now Delete
+
+- **Helper entities that exist only to show or drive an app:** an `input_boolean`, `input_button` or template sensor that your app reads or writes, or a sensor your app creates with `self.api.set_state`. An app instance can now declare its own buttons, switches and sensors, with stable unique IDs, on the instance's own device. (#79)
+
+### Features
+
+- **Entities your app instances declare.** An app instance can declare Home Assistant buttons, switches and sensors through hassette's `self.integration`. Each instance that declares any gets its own device under its app's device, named after the instance (`living_room` shows as "Living room"), with entity ids like `switch.motion_lights_living_room_occupied`. Pressing a button or toggling a switch runs the instance's handler. The entities are available only while the instance runs. One the running instance stops declaring is removed, and its device goes once it declares nothing; declare it again and it comes back with its entity id, name and area. (#79)
+- **Live updates from hassette.** A value your app sets on a declared sensor or switch, and a change in an app's status, now reach Home Assistant within about a second instead of on the next 30-second poll. Polling continues alongside, and if the live connection drops, nothing goes unavailable: values update with each poll until it reconnects. A reverse proxy in front of hassette has to pass WebSocket connections through (in nginx, the `Upgrade` and `Connection` headers on the `/api/ws` location); otherwise the log warns once and values update with each poll. With **Enable polling for changes** turned off in the integration's system options, a dropped connection stays down until something refreshes the integration. (#86)
+- **The app status sensor shows Starting and Stopping.** hassette 0.66 reports these while an app starts or stops. The app's switch and reload button are unavailable during them. (#79)
+
 ## [0.8.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.7.0...v0.8.0) (2026-11-17)
 
 ### Breaking Changes
