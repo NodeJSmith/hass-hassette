@@ -37,6 +37,8 @@ TOKEN = "s3cret-token"  # noqa: S105 - a test fixture, not a credential
 
 SWITCH = "switch.motion_lights"
 VERSION_ISSUE = (DOMAIN, "unsupported_version")
+# How long FakeStream.send waits for the stream to handle an item before failing the test.
+DELIVERY_TIMEOUT = 5
 
 
 def make_health(**overrides: Any) -> SystemStatusResponse:
@@ -152,7 +154,9 @@ class FakeStream:
                     raise item
                 await on_message(item)
             finally:
-                delivered.set_result(None)
+                # send() may have given up waiting and cancelled the future.
+                if not delivered.done():
+                    delivered.set_result(None)
 
     def queue_item(self, item: Any) -> asyncio.Future[None]:
         """Queue ``item`` and return a future that resolves once the stream has handled it."""
@@ -162,7 +166,11 @@ class FakeStream:
 
     async def send(self, hass: HomeAssistant, item: Any) -> None:
         """Deliver ``item`` and wait until it is handled and any refresh it scheduled has finished."""
-        await self.queue_item(item)
+        try:
+            async with asyncio.timeout(DELIVERY_TIMEOUT):
+                await self.queue_item(item)
+        except TimeoutError:
+            pytest.fail(f"the stream never handled {item!r}: it isn't running, or it ended before reading the queue")
         await settle(hass)
 
 

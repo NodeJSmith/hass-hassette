@@ -96,6 +96,7 @@ class PushOutcome(Enum):
 
     APPLIED = auto()
     OTHER_BOOT = auto()
+    UNSUPPORTED_PLATFORM = auto()
     STALE = auto()
     UNKNOWN_TARGET = auto()
 
@@ -103,6 +104,7 @@ class PushOutcome(Enum):
 # Why a push wasn't applied, as the debug log says it.
 PUSH_SKIP_REASONS: dict[PushOutcome, str] = {
     PushOutcome.OTHER_BOOT: "it isn't from the held listing's hassette boot",
+    PushOutcome.UNSUPPORTED_PLATFORM: "this integration has no entities on its platform",
     PushOutcome.STALE: "its revision isn't newer than the one held",
     PushOutcome.UNKNOWN_TARGET: "the held listing lacks its app, instance or entity",
 }
@@ -238,7 +240,10 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
             held_app = held.apps.get(app.app_key) if held is not None else None
             instances: list[AppInstance] = []
             for instance in app.instances:
-                held_instance = find_instance(held_app, instance.instance_name) if held_app is not None else None
+                # With no push newer than the listing there is nothing to keep, so skip the held lookup.
+                held_instance = (
+                    find_instance(held_app, instance.instance_name) if held_app is not None and newer else None
+                )
                 merged_instance, kept = keep_newer_pushes(app.app_key, instance, held_instance, newer)
                 instances.append(merged_instance)
                 marks.update(kept)
@@ -254,8 +259,10 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
     def apply_entity_push(self, push: EntityStateChangedData) -> PushOutcome:
         """Apply a pushed entity value to the held data and update the entities, unless it is skipped.
 
-        It applies only to an entity the held listing has, from the listing's boot, with a revision newer than
-        both the listing's and any push already applied to that entity. ``self.data`` is replaced, not mutated,
+        It applies only to an entity on a declared platform that the held listing has, from the listing's boot,
+        with a revision newer than both the listing's and any push already applied to that entity. The listing
+        keeps declarations on platforms this integration doesn't support, but no entity shows them, so a push to
+        one is skipped before it can replace the data and wake the listeners. ``self.data`` is replaced, not mutated,
         and ``async_set_updated_data`` isn't used, because it would push the next poll back a full interval on
         every push.
         """
@@ -263,6 +270,8 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         if held is None or push.boot_id != held.boot_id:
             return PushOutcome.OTHER_BOOT
         entity = push.entity
+        if entity.platform not in DECLARED_PLATFORMS:
+            return PushOutcome.UNSUPPORTED_PLATFORM
         key = entity_key(push.app_key, push.instance_name, entity)
         if push.entity_revision <= max(held.entity_revision, held.pushed_revisions.get(key, 0)):
             return PushOutcome.STALE

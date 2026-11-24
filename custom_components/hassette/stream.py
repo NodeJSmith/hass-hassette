@@ -19,7 +19,7 @@ from hassette_wire import (
 from homeassistant.core import callback
 
 from .const import SCAN_INTERVAL
-from .coordinator import DECLARED_PLATFORMS, PUSH_SKIP_REASONS, HassetteConfigEntry, HassetteCoordinator, PushOutcome
+from .coordinator import PUSH_SKIP_REASONS, HassetteConfigEntry, HassetteCoordinator, PushOutcome
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -147,11 +147,7 @@ class HassetteStream:
             push.instance_name,
             PUSH_SKIP_REASONS[outcome],
         )
-        if (
-            outcome is PushOutcome.UNKNOWN_TARGET
-            and push.entity.platform in DECLARED_PLATFORMS
-            and self.coordinator.usable_app_key(push.app_key)
-        ):
+        if outcome is PushOutcome.UNKNOWN_TARGET and self.coordinator.usable_app_key(push.app_key):
             self.request_refresh(f"{push.app_key}/{push.instance_name} pushed an entity the listing lacks")
 
     def on_status_push(self, push: AppStatusChangedData) -> None:

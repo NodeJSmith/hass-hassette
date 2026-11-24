@@ -29,7 +29,17 @@ from custom_components.hassette.const import SCAN_INTERVAL
 from custom_components.hassette.coordinator import PUSH_SKIP_REASONS, PushOutcome
 from custom_components.hassette.stream import MESSAGE_TYPES
 
-from .conftest import SWITCH, FakeStream, make_app, make_declared, make_instance, poll, settle, stream_running
+from .conftest import (
+    DELIVERY_TIMEOUT,
+    SWITCH,
+    FakeStream,
+    make_app,
+    make_declared,
+    make_instance,
+    poll,
+    settle,
+    stream_running,
+)
 
 LUX = "sensor.motion_lights_living_room_lux"
 TEMP = "sensor.motion_lights_living_room_temp"
@@ -221,13 +231,26 @@ async def test_push_for_an_entity_the_listing_lacks_fetches_a_listing(
 async def test_push_that_never_reaches_the_listing_fetches_nothing(
     hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, message: EntityStateChangedWsMessage
 ) -> None:
-    """An undeclared platform or an unusable app key is never in the held data, so refetching would loop."""
+    """No entity shows an undeclared platform or an unusable app key, so refetching would loop."""
     stream = await load(hass, client, config_entry, listing(declaring(lux(3))))
     polls = client.get_apps.await_count
 
     await stream.send(hass, message)
 
     assert client.get_apps.await_count == polls
+
+
+async def test_push_to_a_listed_declaration_on_an_undeclared_platform_changes_nothing(
+    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry
+) -> None:
+    """The listing keeps a declaration no entity shows; a push to it must not replace the data or wake listeners."""
+    stream = await load(hass, client, config_entry, listing(declaring(lux(3), make_declared("mode", "select"))))
+    coordinator = config_entry.runtime_data
+    held = coordinator.data
+
+    await stream.send(hass, entity_push(make_declared("mode", "select", value="eco"), revision=2))
+
+    assert coordinator.data is held
 
 
 async def test_newer_status_fetches_a_listing(
@@ -571,22 +594,23 @@ async def test_message_handling_never_waits_for_a_refresh(
 ) -> None:
     stream = await load(hass, client, config_entry, listing(declaring(lux(3))))
     release = asyncio.Event()
+    refresh_started = asyncio.Event()
 
     async def slow_listing() -> AppListResponse:
+        refresh_started.set()
         await release.wait()
         return listing(declaring(lux(3)))
 
     client.get_apps.side_effect = slow_listing
-    handled = stream.queue_item(apps_changed())
-    # A few loop turns are enough for a handler that only schedules the refresh; one that awaited the refresh
-    # would still be waiting on the held listing however many turns it got.
-    for _ in range(20):
-        if handled.done():
-            break
-        await asyncio.sleep(0)
-
-    assert handled.done()
-    release.set()
+    try:
+        handled = stream.queue_item(apps_changed())
+        # The refresh is running and blocked on the listing: a handler that awaited it couldn't have finished.
+        async with asyncio.timeout(DELIVERY_TIMEOUT):
+            await refresh_started.wait()
+            await handled
+        assert stream_running(hass)
+    finally:
+        release.set()
     await settle(hass)
 
 
