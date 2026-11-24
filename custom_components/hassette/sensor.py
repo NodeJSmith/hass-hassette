@@ -1,6 +1,7 @@
 """The status sensor on each hassette app's device, and the sensors app instances declare."""
 
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Any
 
 from hassette_wire import AppStatus, UnknownValue
@@ -100,7 +101,9 @@ class HassetteDeclaredSensor(HassetteDeclaredEntity, SensorEntity):
         raw = str(declared.value)
         parsed = parse_date_value(raw, device_class)
         if parsed is None:
-            self.warn_once(raw, f"hassette sent {raw!r}, which isn't a valid {device_class}; showing it as unknown")
+            self.warn_once(
+                f"value:{raw}", f"hassette sent {raw!r}, which isn't a valid {device_class}; showing it as unknown"
+            )
         return parsed
 
     @property
@@ -113,24 +116,22 @@ class HassetteDeclaredSensor(HassetteDeclaredEntity, SensorEntity):
         declared = self.declared
         if declared is None or declared.device_class is None:
             return None
-        if (parsed := try_parse_enum(SensorDeviceClass, declared.device_class)) is None:
-            self.warn_once(f"device_class:{declared.device_class}", unknown_class("device", declared.device_class))
-        return parsed
+        return parse_declared_class(self, SensorDeviceClass, "device", declared.device_class)
 
     @property
     def state_class(self) -> SensorStateClass | None:
         declared = self.declared
         if declared is None or declared.state_class is None:
             return None
-        if (parsed := try_parse_enum(SensorStateClass, declared.state_class)) is None:
-            self.warn_once(f"state_class:{declared.state_class}", unknown_class("state", declared.state_class))
-        return parsed
+        return parse_declared_class(self, SensorStateClass, "state", declared.state_class)
 
     @property
     def options(self) -> list[str] | None:
         # HA accepts options only on an enum sensor, so they go with an enum class this HA knows.
         declared = self.declared
-        return None if declared is None or self.device_class is not SensorDeviceClass.ENUM else declared.options
+        if declared is None or self.device_class is not SensorDeviceClass.ENUM:
+            return None
+        return declared.options
 
 
 def parse_date_value(raw: str, device_class: str) -> date | datetime | None:
@@ -146,3 +147,12 @@ def parse_date_value(raw: str, device_class: str) -> date | datetime | None:
 def unknown_class(kind: str, value: str) -> str:
     """The warning for a declared device or state class this version of Home Assistant doesn't have."""
     return f"this Home Assistant has no {kind} class {value!r}; leaving it out"
+
+
+def parse_declared_class[E: StrEnum](
+    entity: HassetteDeclaredEntity, enum_cls: type[E], kind: str, value: str
+) -> E | None:
+    """Parse a declared device or state class, or warn once and return ``None`` when this HA doesn't have it."""
+    if (parsed := try_parse_enum(enum_cls, value)) is None:
+        entity.warn_once(f"{kind}_class:{value}", unknown_class(kind, value))
+    return parsed

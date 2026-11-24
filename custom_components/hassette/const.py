@@ -3,9 +3,14 @@
 from datetime import timedelta
 from typing import Final
 
+from homeassistant.const import Platform
+
 DOMAIN: Final = "hassette"
 MANUFACTURER: Final = "Hassette"
 SERVER_DEVICE_NAME: Final = "Hassette"
+
+# The platforms each config entry forwards to. Every one of them also adds the entities app instances declare.
+PLATFORMS: Final = (Platform.BUTTON, Platform.SENSOR, Platform.SWITCH)
 
 # A new connection checks hassette's TLS certificate unless the user turns it off.
 DEFAULT_VERIFY_SSL: Final = True
