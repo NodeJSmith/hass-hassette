@@ -29,12 +29,11 @@ from custom_components.hassette.const import SCAN_INTERVAL
 from custom_components.hassette.coordinator import PUSH_SKIP_REASONS, PushOutcome
 from custom_components.hassette.stream import MESSAGE_TYPES
 
-from .conftest import FakeStream, make_app, make_declared, make_instance, poll, settle, stream_running
+from .conftest import SWITCH, FakeStream, make_app, make_declared, make_instance, poll, settle, stream_running
 
 LUX = "sensor.motion_lights_living_room_lux"
 TEMP = "sensor.motion_lights_living_room_temp"
 OCCUPIED = "switch.motion_lights_living_room_occupied"
-SWITCH = "switch.motion_lights"
 
 
 def lux(value: Any, **overrides: Any) -> DeclaredEntity:
@@ -116,6 +115,11 @@ async def loaded_stream(hass: HomeAssistant, client: MagicMock, config_entry: Mo
 
 def state(hass: HomeAssistant, entity_id: str) -> str:
     return current(hass, entity_id).state
+
+
+def logged(caplog: pytest.LogCaptureFixture, text: str, level: int | None = None) -> list[logging.LogRecord]:
+    """Captured records whose message contains `text`, optionally only at `level`."""
+    return [r for r in caplog.records if text in r.getMessage() and (level is None or r.levelno == level)]
 
 
 async def test_connect_subscribes_then_fetches_a_listing(
@@ -372,7 +376,6 @@ async def test_failed_resync_ends_the_stream_before_any_push_applies(
     stream = await load(hass, client, config_entry, listing(declaring(lux(3))))
     await stream.send(hass, HassetteConnectionError("closed"))
 
-    # The poll that restarts the stream succeeds, but the resync on connect gets a tolerated failure.
     # The poll that restarts the stream succeeds; the resync after it times out.
     client.get_apps.side_effect = timing_out_on(lambda call: call == 2)
     queued = stream.queue_item(entity_push(lux(7), revision=2))
@@ -455,7 +458,7 @@ async def test_repeated_drops_are_logged_once_until_a_resync_succeeds(
     freezer: FrozenDateTimeFactory,
 ) -> None:
     def drop_logs() -> int:
-        return sum("stream ended" in record.getMessage() for record in caplog.records)
+        return len(logged(caplog, "stream ended"))
 
     stream = await load(hass, client, config_entry, listing(declaring(lux(3))))
     # The stream drops, and each restart after a poll fails the same way: one log line.
@@ -507,7 +510,7 @@ async def test_stream_that_never_works_warns_once(
     await poll(hass, freezer)
     await poll(hass, freezer)
 
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "live updates" in r.getMessage()]
+    warnings = logged(caplog, "live updates", logging.WARNING)
     assert len(warnings) == 1
     assert client.listen.await_count == 3
 
@@ -518,7 +521,7 @@ async def test_drop_of_a_working_stream_is_info(
     stream = await load(hass, client, config_entry, listing(declaring(lux(3))))
     await stream.send(hass, HassetteConnectionError("closed"))
 
-    ended = [r for r in caplog.records if "stream ended" in r.getMessage()]
+    ended = logged(caplog, "stream ended")
     assert [r.levelno for r in ended] == [logging.INFO]
 
 
@@ -540,9 +543,9 @@ async def test_resync_that_keeps_failing_logs_once(
 
     # The first connect at setup, then one restart after each of the three polls.
     assert stream.connects == 4
-    assert sum("wasn't applied" in r.getMessage() for r in caplog.records) == 1
+    assert len(logged(caplog, "wasn't applied")) == 1
     # No connect in the loop counts as the stream working again.
-    assert not any("Receiving hassette's live updates" in r.getMessage() for r in caplog.records)
+    assert not logged(caplog, "Receiving hassette's live updates")
 
 
 async def test_unreadable_message_warns_once_per_setup(
@@ -555,7 +558,7 @@ async def test_unreadable_message_warns_once_per_setup(
     await stream.send(hass, unreadable)
 
     assert stream.connects == 2
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "can't read" in r.getMessage()]
+    warnings = logged(caplog, "can't read", logging.WARNING)
     assert len(warnings) == 1
 
 
@@ -602,7 +605,7 @@ async def test_stream_working_is_logged_once_it_resyncs(
     caplog.set_level(logging.INFO, "custom_components.hassette.stream")
     await load(hass, client, config_entry, listing(declaring(lux(3))))
 
-    assert sum("Receiving hassette's live updates" in r.getMessage() for r in caplog.records) == 1
+    assert len(logged(caplog, "Receiving hassette's live updates")) == 1
 
 
 async def test_failed_first_resync_is_a_warning(
@@ -613,7 +616,7 @@ async def test_failed_first_resync_is_a_warning(
     await load(hass, client, config_entry, listing(declaring(lux(3))))
 
     assert not stream_running(hass)
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "live updates" in r.getMessage()]
+    warnings = logged(caplog, "live updates", logging.WARNING)
     assert len(warnings) == 1
 
 
