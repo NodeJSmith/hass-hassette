@@ -22,7 +22,7 @@ from hassette_wire import (
     SystemStatusResponse,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_URL, Platform
+from homeassistant.const import CONF_URL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -39,6 +39,7 @@ from .const import (
     DOMAIN,
     ISSUE_UNSUPPORTED_VERSION,
     MANUFACTURER,
+    PLATFORMS,
     SCAN_INTERVAL,
     SERVER_DEVICE_ID,
     SERVER_DEVICE_NAME,
@@ -60,7 +61,8 @@ _LOGGER = logging.getLogger(__name__)
 APP_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_.]{0,127}")
 
 # The platforms an app instance can declare entities on. A declaration on any other platform is skipped.
-DECLARED_PLATFORMS = frozenset({Platform.BUTTON, Platform.SENSOR, Platform.SWITCH})
+# Every forwarded platform also adds declared entities, so this is the same set as PLATFORMS.
+DECLARED_PLATFORMS = frozenset(PLATFORMS)
 
 type HassetteConfigEntry = ConfigEntry[HassetteCoordinator]
 
