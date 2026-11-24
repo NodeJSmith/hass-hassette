@@ -125,6 +125,10 @@ If the live connection drops, nothing goes unavailable: values update with each 
 the integration reconnects after the next poll that reaches hassette. A proxy in front of hassette
 has to pass WebSocket connections through for live updates to work.
 
+If you turn off **Enable polling for changes** in the integration's system options, nothing polls
+hassette, so a dropped live connection stays down until something refreshes the integration: a
+`homeassistant.update_entity` action on one of its entities, or reloading it.
+
 ### Entities your apps declare
 
 An app can declare its own buttons, switches and sensors with hassette's `self.integration`. Each app

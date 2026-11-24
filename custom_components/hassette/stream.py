@@ -87,7 +87,7 @@ class HassetteStream:
         self.launch()
 
     async def run(self) -> None:
-        """Listen until the stream ends, then log why; the next good poll starts it again."""
+        """Listen until the stream ends, then log why; the next good refresh starts it again."""
         try:
             await self.coordinator.client.listen(self.on_message, types=MESSAGE_TYPES, on_connected=self.on_connected)
         except ResponseValidationError as exc:
@@ -96,7 +96,7 @@ class HassetteStream:
             self.log_failure_once(exc)
         except Exception:
             # A bug applying a message. Logged on every cycle: the same message would end the next stream too.
-            _LOGGER.exception("hassette's /ws stream failed; it restarts after the next good poll")
+            _LOGGER.exception("hassette's /ws stream failed; it restarts after the next good refresh")
 
     async def on_connected(self) -> None:
         """Fetch a listing before any push applies, and end the stream unless that fetch's listing was applied.
@@ -209,7 +209,9 @@ class HassetteStream:
         self.logged_failures.add(kind)
         if self.has_resynced:
             _LOGGER.info(
-                "hassette's /ws stream ended (%s); polling continues and it reconnects after the next good poll", exc
+                "hassette's /ws stream ended (%s); values update with each refresh, and it reconnects after the next "
+                "good one",
+                exc,
             )
         else:
             _LOGGER.warning(
