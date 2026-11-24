@@ -1,7 +1,7 @@
 # Design: Push declared entity state from hassette's /ws
 
 **Date:** 2026-11-23
-**Status:** ratified
+**Status:** built
 **Mode:** sketch
 **Issues:** #73
 **Parent:** NodeJSmith/hassette `design/specs/155-hacs-app-entities/design.md` (Breakdown issue 6)
@@ -305,7 +305,7 @@ that orders it, which D2's premise needs.
 
 - [x] Implementation and tests committed
 - [x] Docs (README "Updates" and declared-entities bullet, CLAUDE.md layout)
-- [ ] Ship-time challenge
+- [x] Ship-time challenge
 
 **Calls made during the build:**
 - Fetch numbers stand in for "`last_success` advanced" (D4): each refresh numbers its fetch when it starts (`fetches_started`), and a refresh whose listing was applied records its number (`last_applied_fetch`), set with `last_success` after the data is built. The connect resync passes only when a fetch started after subscribing was applied, so a poll already in flight (which may have read its listing before the subscription) can't pass for it, and two good polls in one clock tick still count as two. The restart rule (D3) compares `last_applied_fetch` the same way.
