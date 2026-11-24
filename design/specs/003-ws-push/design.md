@@ -5,7 +5,7 @@
 **Mode:** sketch
 **Issues:** #73
 **Parent:** NodeJSmith/hassette `design/specs/155-hacs-app-entities/design.md` (Breakdown issue 6)
-**Prior art:** NodeJSmith/hassette `design/research/2026-11-23-push-poll-hybrid/prior-art.md`, NodeJSmith/hassette `design/research/2026-11-23-push-stream-failure-reporting/prior-art.md`, NodeJSmith/hassette `design/research/2026-11-22-python-ws-client-subscriptions/prior-art.md`, NodeJSmith/hassette `design/research/2026-11-16-app-declared-ha-entities/prior-art.md`
+**Prior art:** `design/research/2026-11-23-push-poll-hybrid/prior-art.md`, `design/research/2026-11-23-push-stream-failure-reporting/prior-art.md`, NodeJSmith/hassette `design/research/2026-11-22-python-ws-client-subscriptions/prior-art.md`, NodeJSmith/hassette `design/research/2026-11-16-app-declared-ha-entities/prior-art.md`
 
 ## Summary
 
