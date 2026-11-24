@@ -33,3 +33,11 @@ the coordinator uses to register the parent app device first?
 ## Action Metadata
 For a new or changed action, do `services.yaml`, the `services` block of `translations/en.json`,
 `icons.json` and the schema in `services.py` agree on the action's fields and which are required?
+
+## Push and Poll Merge
+`coordinator.data` has two writers: the poll, through `merge_listing`, and the `/ws` stream, through
+`apply_entity_push`. Revisions decide between them: a push older than the held listing or the entity's
+last pushed revision is dropped, and a poll keeps any pushed value newer than its own listing. Does a new
+or changed write to `coordinator.data` go through one of those two, or does it replace the data
+directly and let an older value overwrite a newer one? Does a push path still avoid
+`async_set_updated_data`, which postpones the next poll?

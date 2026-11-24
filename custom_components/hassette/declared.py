@@ -23,6 +23,8 @@ from .coordinator import (
     HassetteCoordinator,
     declarations,
     declared_unique_id,
+    find_entity,
+    find_instance,
     instance_identifier,
     may_add_declared,
 )
@@ -83,30 +85,21 @@ class HassetteDeclaredEntity(CoordinatorEntity[HassetteCoordinator]):
 
     @property
     def instance(self) -> AppInstance | None:
-        """The instance as of the latest poll, or ``None`` when hassette no longer lists it."""
+        """The instance as of the latest poll or push, or ``None`` when hassette no longer lists it."""
         app = self.coordinator.data.apps.get(self.app_key)
-        if app is None:
-            return None
-        return next((instance for instance in app.instances if instance.instance_name == self.instance_name), None)
+        return None if app is None else find_instance(app, self.instance_name)
 
     @property
     def declared(self) -> DeclaredEntity | None:
-        """This entity's declaration as of the latest poll, or ``None`` when its instance no longer lists it."""
+        """This entity's declaration as of the latest poll or push, or ``None`` when its instance no longer lists it."""
         instance = self.instance
         if instance is None:
             return None
-        return next(
-            (
-                entity
-                for entity in instance.entities or []
-                if entity.key == self.key and entity.platform == self.declared_platform
-            ),
-            None,
-        )
+        return find_entity(instance.entities or [], self.key, self.declared_platform)
 
     @property
     def name(self) -> str:
-        """The declared name as of the latest poll, so a rename in the app follows; the first one seen otherwise."""
+        """The declared name as of the latest poll or push, so a rename in the app follows; else the first one seen."""
         declared = self.declared
         return self.declared_name if declared is None else declared.name
 
