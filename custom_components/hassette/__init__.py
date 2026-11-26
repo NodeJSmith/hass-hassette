@@ -40,7 +40,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: HassetteConfigEntry) -> 
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # After the platforms, so their listeners exist before the first push.
-    HassetteStream(entry, coordinator).start()
+    coordinator.stream = HassetteStream(entry, coordinator)
+    coordinator.stream.start()
     return True
 
 

@@ -7,6 +7,9 @@ good poll, so it never retries against a hassette the poll can't reach or a toke
 
 import asyncio
 import logging
+from collections import Counter
+from dataclasses import dataclass, field
+from datetime import datetime
 
 from hassette_client import HassetteClientError, ResponseValidationError
 from hassette_wire import (
@@ -17,6 +20,7 @@ from hassette_wire import (
     EntityStateChangedWsMessage,
 )
 from homeassistant.core import callback
+from homeassistant.util import dt as dt_util
 
 from .const import SCAN_INTERVAL
 from .coordinator import PUSH_SKIP_REASONS, HassetteConfigEntry, HassetteCoordinator, PushOutcome
@@ -33,6 +37,18 @@ MESSAGE_TYPES: tuple[type[StreamMessage], ...] = (
 
 # The stream task's name, followed by the config entry's id.
 STREAM_TASK_NAME = "hassette /ws stream"
+
+
+@dataclass(slots=True)
+class StreamHealth:
+    """What the stream has done since setup, for the diagnostics download: the poll hides every stream failure."""
+
+    last_connected: datetime | None = None
+    last_message: datetime | None = None
+    pushes_applied: int = 0
+    # Entity pushes not applied, by the PushOutcome name that says why.
+    pushes_ignored: Counter[str] = field(default_factory=Counter)
+    last_error: str | None = None
 
 
 class ResyncFailedError(Exception):
@@ -55,6 +71,11 @@ class HassetteStream:
         self.logged_failures: set[str] = set()
         # A message this integration can't read is reported once per setup: reconnecting doesn't fix it.
         self.reported_unreadable = False
+        self.health = StreamHealth()
+
+    @property
+    def running(self) -> bool:
+        return self.task is not None and not self.task.done()
 
     @callback
     def start(self) -> None:
@@ -78,7 +99,7 @@ class HassetteStream:
         only a listing actually fetched restarts the stream.
         """
         current = self.coordinator.last_applied_fetch
-        if self.task is not None and not self.task.done():
+        if self.running:
             self.seen_fetch = current
             return
         if current == self.seen_fetch:
@@ -87,16 +108,22 @@ class HassetteStream:
         self.launch()
 
     async def run(self) -> None:
-        """Listen until the stream ends, then log why; the next good refresh starts it again."""
+        """Listen until the stream ends, then log and record why; the next good refresh starts it again."""
         try:
             await self.coordinator.client.listen(self.on_message, types=MESSAGE_TYPES, on_connected=self.on_connected)
         except ResponseValidationError as exc:
+            self.record_error(exc)
             self.log_unreadable_once(exc)
         except (HassetteClientError, ResyncFailedError) as exc:
+            self.record_error(exc)
             self.log_failure_once(exc)
-        except Exception:
+        except Exception as exc:
+            self.record_error(exc)
             # A bug applying a message. Logged on every cycle: the same message would end the next stream too.
             _LOGGER.exception("hassette's /ws stream failed; it restarts after the next good refresh")
+
+    def record_error(self, exc: Exception) -> None:
+        self.health.last_error = f"{type(exc).__name__}: {exc}"
 
     async def on_connected(self) -> None:
         """Fetch a listing before any push applies, and end the stream unless that fetch's listing was applied.
@@ -106,6 +133,7 @@ class HassetteStream:
         before the subscription, so only a fetch started after this point counts.
         """
         _LOGGER.debug("Connected to hassette's /ws stream; fetching a listing")
+        self.health.last_connected = dt_util.utcnow()
         before = self.coordinator.fetches_started
         await self.coordinator.async_refresh()
         if self.coordinator.last_applied_fetch <= before:
@@ -122,6 +150,7 @@ class HassetteStream:
         Nothing here awaits a refresh: an awaited request runs the whole refresh inline and would stall the
         stream reader for a round trip.
         """
+        self.health.last_message = dt_util.utcnow()
         match message:
             case EntityStateChangedWsMessage(data=data):
                 self.on_entity_push(data)
@@ -139,7 +168,9 @@ class HassetteStream:
         """
         outcome = self.coordinator.apply_entity_push(push)
         if outcome is PushOutcome.APPLIED:
+            self.health.pushes_applied += 1
             return
+        self.health.pushes_ignored[outcome.name.lower()] += 1
         _LOGGER.debug(
             "Not applying %s on %s/%s: %s",
             push.entity.key,

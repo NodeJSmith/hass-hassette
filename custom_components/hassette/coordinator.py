@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from hassette_client import (
     HassetteClient,
@@ -57,6 +57,9 @@ from .errors import (
     poll_error,
     version_placeholders,
 )
+
+if TYPE_CHECKING:
+    from .stream import HassetteStream
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -174,6 +177,8 @@ class HassetteCoordinator(DataUpdateCoordinator[HassetteData]):
         # Unreadable responses and unexpected errors logged since the last good poll, by (endpoint, error
         # type): not by message, which can embed the body size and so change on every poll.
         self.logged_poll_errors: set[tuple[str | None, str]] = set()
+        # The entry's /ws stream, once setup starts it; the diagnostics download reports its health.
+        self.stream: HassetteStream | None = None
 
     async def _async_update_data(self) -> HassetteData:
         self.fetches_started += 1
