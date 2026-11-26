@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.9.0...v0.10.0) (2026-11-26)
+
+
+### Features
+
+* add a diagnostics download reporting the /ws stream's health ([#97](https://github.com/NodeJSmith/hass-hassette/issues/97)) ([36b2a13](https://github.com/NodeJSmith/hass-hassette/commit/36b2a136c6f4fccaaec4dce60d0177a56cb4b36f))
+
+
+### Bug Fixes
+
+* let a declared entity take over a leftover set_state entity id instead of registering &lt;id&gt;_2 ([#95](https://github.com/NodeJSmith/hass-hassette/issues/95)) ([949276e](https://github.com/NodeJSmith/hass-hassette/commit/949276ee792d95f7cf7745fe0a1a1372efe40b0e))
+
 ## [0.9.0](https://github.com/NodeJSmith/hass-hassette/compare/v0.8.0...v0.9.0) (2026-11-24)
 
 ### Breaking Changes
