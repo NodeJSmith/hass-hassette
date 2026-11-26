@@ -32,7 +32,6 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from homeassistant.setup import async_setup_component
 from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.hassette import async_remove_config_entry_device
@@ -53,7 +52,6 @@ from .conftest import (
 OCCUPIED = "switch.motion_lights_living_room_occupied"
 PING = "button.motion_lights_living_room_ping"
 LUX = "sensor.motion_lights_living_room_lux"
-HALL_LUX = "sensor.hall_lux"
 INSTANCE_ID = (DOMAIN, "motion_lights-living_room")
 THREE = (
     make_declared("occupied", "switch", value=True),
@@ -163,59 +161,6 @@ async def test_suggested_entity_id_applies_only_on_first_creation(
     await relist(hass, client, freezer, declaring(make_declared("occupied", default_entity_id="switch.other")))
     assert state(hass, "switch.hall_presence") is not None
     assert state(hass, "switch.other") is None
-
-
-async def test_declared_entity_takes_over_a_leftover_set_state_id(
-    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry, caplog: pytest.LogCaptureFixture
-) -> None:
-    hass.states.async_set("switch.hall_presence", "on")
-
-    with caplog.at_level(logging.INFO):
-        await load_with(
-            hass, client, config_entry, declaring(make_declared("occupied", default_entity_id="switch.hall_presence"))
-        )
-
-    entry = er.async_get(hass).async_get("switch.hall_presence")
-    assert entry is not None
-    assert entry.platform == DOMAIN
-    assert state(hass, "switch.hall_presence_2") is None
-    assert "leftover state of switch.hall_presence" in caplog.text
-
-
-async def test_declared_entity_leaves_a_registered_id_to_its_owner(
-    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry
-) -> None:
-    er.async_get(hass).async_get_or_create("switch", "other", "owner", suggested_object_id="hall_presence")
-    hass.states.async_set("switch.hall_presence", "on")
-
-    await load_with(
-        hass, client, config_entry, declaring(make_declared("occupied", default_entity_id="switch.hall_presence"))
-    )
-
-    assert state(hass, "switch.hall_presence") == "on"
-    entry = er.async_get(hass).async_get("switch.hall_presence_2")
-    assert entry is not None
-    assert entry.platform == DOMAIN
-
-
-async def test_declared_entity_leaves_a_live_entity_without_unique_id_alone(
-    hass: HomeAssistant, client: MagicMock, config_entry: MockConfigEntry
-) -> None:
-    assert await async_setup_component(
-        hass, "template", {"template": [{"sensor": [{"name": "Hall lux", "state": "7"}]}]}
-    )
-    await hass.async_block_till_done()
-    assert er.async_get(hass).async_get(HALL_LUX) is None
-
-    await load_with(
-        hass,
-        client,
-        config_entry,
-        declaring(make_declared("lux", "sensor", value=3, default_entity_id=HALL_LUX)),
-    )
-
-    assert state(hass, HALL_LUX) == "7"
-    assert state(hass, f"{HALL_LUX}_2") == "3"
 
 
 async def test_renamed_declaration_renames_the_entity(

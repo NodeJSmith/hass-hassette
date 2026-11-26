@@ -181,9 +181,17 @@ def add_declared_entities(
                 unique_id = declared_unique_id(app.app_key, instance.instance_name, declared.key)
                 if not wanted(app, instance, declared, unique_id):
                     continue
-                added.add(unique_id)
+                leftover = None
                 if declared.default_entity_id and registry.async_get_entity_id(platform, DOMAIN, unique_id) is None:
-                    take_over_leftover_state(coordinator.hass, registry, declared.default_entity_id)
+                    leftover = leftover_state(coordinator.hass, registry, declared.default_entity_id)
+                if leftover is not None and not coordinator.app_list_trusted:
+                    # Removing the state acts on an app list that may be incomplete, so wait for a trusted one.
+                    # Adding the entity now without the takeover would register it as <id>_2 for good.
+                    continue
+                added.add(unique_id)
+                if leftover is not None:
+                    _LOGGER.info("Removing the leftover state of %s so the declared entity can take that id", leftover)
+                    coordinator.hass.states.async_remove(leftover)
                 new.append(entity_class(coordinator, app.app_key, instance, declared, app_device.id))
         if new:
             add_entities(new)
@@ -192,17 +200,16 @@ def add_declared_entities(
     entry.async_on_unload(coordinator.async_add_listener(add_new))
 
 
-def take_over_leftover_state(hass: HomeAssistant, registry: er.EntityRegistry, entity_id: str) -> None:
-    """Remove ``entity_id``'s state when nothing owns it, so a new declared entity gets that id rather than ``_2``.
+def leftover_state(hass: HomeAssistant, registry: er.EntityRegistry, entity_id: str) -> str | None:
+    """``entity_id`` if it has a state nothing owns, which a new declared entity removes to take that id; else None.
 
     Such a state is what ``POST /api/states`` (hassette's ``api.set_state``) leaves behind: a state with no
     registry entry and no entity writing it. An id with a registry entry or a live entity is left alone, and
-    Home Assistant's usual suffixing applies.
+    Home Assistant's usual suffixing (``<id>_2``) applies.
     """
     if hass.states.get(entity_id) is None or registry.async_is_registered(entity_id):
-        return
+        return None
     component = hass.data.get(DATA_INSTANCES, {}).get(entity_id.partition(".")[0])
     if component is not None and component.get_entity(entity_id) is not None:
-        return
-    _LOGGER.info("Removing the leftover state of %s so the declared entity can take that id", entity_id)
-    hass.states.async_remove(entity_id)
+        return None
+    return entity_id
