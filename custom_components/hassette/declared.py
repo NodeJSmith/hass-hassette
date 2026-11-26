@@ -10,11 +10,12 @@ from typing import Any
 
 from hassette_wire import AppInstance, AppSummary, DeclaredEntity, ResourceStatus
 from homeassistant.const import EntityCapabilityAttribute, EntityStateAttribute, Platform
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import ChildDeviceInfo
 from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity_component import DATA_INSTANCES
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -181,9 +182,27 @@ def add_declared_entities(
                 if not wanted(app, instance, declared, unique_id):
                     continue
                 added.add(unique_id)
+                if declared.default_entity_id and registry.async_get_entity_id(platform, DOMAIN, unique_id) is None:
+                    take_over_leftover_state(coordinator.hass, registry, declared.default_entity_id)
                 new.append(entity_class(coordinator, app.app_key, instance, declared, app_device.id))
         if new:
             add_entities(new)
 
     add_new()
     entry.async_on_unload(coordinator.async_add_listener(add_new))
+
+
+def take_over_leftover_state(hass: HomeAssistant, registry: er.EntityRegistry, entity_id: str) -> None:
+    """Remove ``entity_id``'s state when nothing owns it, so a new declared entity gets that id rather than ``_2``.
+
+    Such a state is what ``POST /api/states`` (hassette's ``api.set_state``) leaves behind: a state with no
+    registry entry and no entity writing it. An id with a registry entry or a live entity is left alone, and
+    Home Assistant's usual suffixing applies.
+    """
+    if hass.states.get(entity_id) is None or registry.async_is_registered(entity_id):
+        return
+    component = hass.data.get(DATA_INSTANCES, {}).get(entity_id.partition(".")[0])
+    if component is not None and component.get_entity(entity_id) is not None:
+        return
+    _LOGGER.info("Removing the leftover state of %s so the declared entity can take that id", entity_id)
+    hass.states.async_remove(entity_id)
